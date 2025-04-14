@@ -1,15 +1,15 @@
 # Stream Vault
 
-A simple video streaming platform with UUID-based URLs for secure video sharing.
+A secure video streaming platform with UUID-based URLs for private video sharing.
 
 ## Overview
 
 Stream Vault is a lightweight video streaming platform that allows you to:
 
-- Upload and manage video content
+- Upload and manage video content in multiple formats
 - Stream videos using HLS (HTTP Live Streaming)
 - Share videos via UUID-based URLs instead of exposing file paths
-- Manage videos through a simple admin interface.
+- Manage videos through a simple authenticated interface
 
 This project is designed to be simple yet functional, focusing on the core features needed for video streaming without unnecessary complexity.
 
@@ -18,7 +18,8 @@ This project is designed to be simple yet functional, focusing on the core featu
 - **UUID-based URLs**: Videos are accessed via UUIDs rather than direct file paths
 - **HLS Streaming**: Videos are served using HTTP Live Streaming for adaptive playback
 - **VideoJS Player**: Feature-rich player with quality selection and playback controls
-- **Simple Admin Interface**: Upload, edit, and delete videos
+- **Multi-Format Upload**: Support for both regular video files and pre-packaged HLS content
+- **Secure Library**: Protected video management interface with authentication
 - **Basic Authentication**: Protect admin functions with simple username/password
 - **Responsive Design**: Works on desktop and mobile devices
 
@@ -28,13 +29,20 @@ This project is designed to be simple yet functional, focusing on the core featu
 stream-vault/
 ├── public/              # Static files
 │   ├── player/          # VideoJS player
-│   ├── admin/           # Admin interface
+│   ├── library/         # Video management interface (protected)
+│   ├── login/           # Authentication page
 │   └── index.html       # Home page
 ├── server/              # Backend code
 │   ├── server.js        # Express server
 │   ├── auth.js          # Authentication
 │   └── video-db.json    # Video metadata storage
 ├── media/               # Video storage directory
+│   └── video_timestamp/ # Each video gets its own directory
+│       ├── original/    # Original uploaded videos (for non-HLS)
+│       ├── 1080p/       # HLS quality variants (for HLS packages)
+│       ├── 720p/
+│       ├── 480p/
+│       └── master.m3u8  # HLS manifest
 ├── upload/              # Temporary upload directory
 ├── package.json         # Project dependencies
 └── nginx.conf           # Nginx configuration
@@ -72,10 +80,10 @@ stream-vault/
 ### Accessing the Platform
 
 - **Home Page**: `http://your-server/`
-- **Admin Interface**: `http://your-server/admin`
+- **Library (Protected)**: `http://your-server/library`
 - **Video Player**: `http://your-server/player/{uuid}`
 
-### Admin Credentials
+### Authentication
 
 Default login:
 - Username: `admin`
@@ -85,11 +93,18 @@ Default login:
 
 ### Adding Videos
 
-1. Access the admin interface
-2. Click "Upload New Video"
+1. Log in and access the library
+2. Click "Upload Video"
 3. Fill in the title and description
-4. Select a video file to upload
+4. Select a file to upload:
+   - Regular video file (MP4, MKV, etc.)
+   - Zip file containing HLS package
 5. Click "Upload"
+
+### Video Status
+
+- **Ready**: HLS packages are immediately available for streaming
+- **Pending Transcode**: Regular video files need transcoding before streaming
 
 ### Sharing Videos
 
@@ -121,11 +136,25 @@ The VideoJS player can be customized by editing `public/player/index.html`. Refe
 
 Potential improvements for future versions:
 
-- Automated video transcoding
-- Thumbnail generation
-- User accounts and permissions
-- Advanced analytics
-- Playlists and categories
+### Transcoding Feature Implementation
+- Automated video transcoding for non-HLS uploads
+- Multiple quality variants (1080p, 720p, 480p)
+- Thumbnail generation from video frames
+- Progress tracking for transcoding jobs
+
+### Database Enhancement
+- Migration to a proper database system (PostgreSQL, MongoDB)
+- Improved metadata storage and retrieval
+- Search and filtering capabilities
+- Video categorization and tagging
+- User management and permissions
+
+### Additional Features
+- Adaptive bitrate streaming improvements
+- Subtitle and caption support
+- Analytics and viewing statistics
+- Playlists and collections
+- API for third-party integrations
 
 ## License
 
