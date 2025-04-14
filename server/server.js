@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const unzipper = require('unzipper');
 const { conditionalAuth } = require('./auth');
+const { processTranscodingQueue } = require('./transcode');
 
 // Promisify the pipeline function
 const pipelineAsync = promisify(pipeline);
@@ -321,7 +322,41 @@ app.get('/admin', (req, res) => {
   res.redirect('/library');
 });
 
+// Get video transcoding status
+app.get('/api/video/:uuid/status', (req, res) => {
+  const { uuid } = req.params;
+  const db = readVideoDB();
+  const video = db.videos.find(v => v.uuid === uuid);
+  
+  if (!video) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+  
+  res.json({
+    status: video.status || 'unknown',
+    progress: video.transcodeProgress || 0
+  });
+});
+
+// Start transcoding process (admin only)
+app.post('/api/admin/transcode', (req, res) => {
+  // Start the transcoding process in the background
+  processTranscodingQueue().catch(err => {
+    console.error('Error in transcoding queue:', err);
+  });
+  
+  res.json({ message: 'Transcoding process started' });
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  
+  // Check for videos that need transcoding on startup
+  setTimeout(() => {
+    console.log('Checking for videos that need transcoding...');
+    processTranscodingQueue().catch(err => {
+      console.error('Error in transcoding queue:', err);
+    });
+  }, 5000); // Wait 5 seconds after server start
 });

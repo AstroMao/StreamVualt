@@ -261,6 +261,75 @@
             font-family: monospace;
             margin-top: 5px;
         }
+        
+        .video-status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .status-badge.pending {
+            background-color: #f8f9fa;
+            color: #6c757d;
+            border: 1px solid #dee2e6;
+        }
+        
+        .status-badge.transcoding {
+            background-color: #cce5ff;
+            color: #004085;
+            border: 1px solid #b8daff;
+        }
+        
+        .status-badge.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-badge.ready {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .progress-bar {
+            height: 10px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        
+        .progress {
+            height: 100%;
+            background-color: #007bff;
+            border-radius: 5px;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-text {
+            font-size: 12px;
+            color: #6c757d;
+        }
+        
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+        
+        .start-transcode {
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
@@ -408,6 +477,14 @@
             uploadForm.addEventListener('submit', handleUpload);
             editForm.addEventListener('submit', handleEdit);
             confirmDelete.addEventListener('click', handleDelete);
+            
+            // Add event delegation for transcoding buttons
+            document.addEventListener('click', async (e) => {
+                if (e.target.classList.contains('start-transcode')) {
+                    const videoId = e.target.getAttribute('data-uuid');
+                    await startTranscoding(videoId);
+                }
+            });
         });
         
         // Helper Functions
@@ -577,10 +654,10 @@
                 videos.sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded));
                 
                 // Create video cards
-                videos.forEach(video => {
-                    const videoCard = createVideoCard(video);
+                for (const video of videos) {
+                    const videoCard = await createVideoCard(video);
                     videoGrid.appendChild(videoCard);
-                });
+                }
                 
             } catch (error) {
                 console.error('Error loading videos:', error);
@@ -594,9 +671,10 @@
             }
         }
         
-        function createVideoCard(video) {
+        async function createVideoCard(video) {
             const card = document.createElement('div');
             card.className = 'video-card';
+            card.id = `video-card-${video.uuid}`;
             
             const playerUrl = `${window.location.origin}/player/${video.uuid}`;
             
@@ -629,6 +707,47 @@
             const urlDisplay = document.createElement('div');
             urlDisplay.className = 'video-url';
             urlDisplay.textContent = playerUrl;
+            
+            // Check video status
+            try {
+                const statusResponse = await fetch(`/api/video/${video.uuid}/status`);
+                if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    
+                    // Add status display
+                    const statusDisplay = document.createElement('div');
+                    statusDisplay.className = `video-status status-${statusData.status}`;
+                    statusDisplay.id = `status-${video.uuid}`;
+                    
+                    if (statusData.status === 'pending_transcode') {
+                        statusDisplay.innerHTML = `
+                            <span class="status-badge pending">Pending Transcode</span>
+                            <button class="btn btn-small start-transcode" data-uuid="${video.uuid}">Start Transcoding</button>
+                        `;
+                    } else if (statusData.status === 'transcoding') {
+                        statusDisplay.innerHTML = `
+                            <span class="status-badge transcoding">Transcoding</span>
+                            <div class="progress-bar">
+                                <div class="progress" style="width: ${statusData.progress}%"></div>
+                            </div>
+                            <span class="progress-text">${statusData.progress}%</span>
+                        `;
+                    } else if (statusData.status === 'error') {
+                        statusDisplay.innerHTML = `
+                            <span class="status-badge error">Error</span>
+                            <button class="btn btn-small start-transcode" data-uuid="${video.uuid}">Retry Transcoding</button>
+                        `;
+                    } else if (statusData.status === 'ready') {
+                        statusDisplay.innerHTML = `
+                            <span class="status-badge ready">Ready</span>
+                        `;
+                    }
+                    
+                    info.appendChild(statusDisplay);
+                }
+            } catch (error) {
+                console.error('Error fetching video status:', error);
+            }
             
             // Add action buttons
             const actions = document.createElement('div');
@@ -666,8 +785,7 @@
             actions.appendChild(editBtn);
             actions.appendChild(deleteBtn);
             
-            info.appendChild(title);
-            info.appendChild(description);
+
             info.appendChild(date);
             info.appendChild(urlDisplay);
             info.appendChild(actions);
@@ -679,10 +797,102 @@
             return card;
         }
         
+        // Start transcoding process
+        async function startTranscoding(videoId) {
+            try {
+                // Update the status display to show "Starting..."
+                const statusDisplay = document.getElementById(`status-${videoId}`);
+                if (statusDisplay) {
+                    statusDisplay.innerHTML = `
+                        <span class="status-badge transcoding">Starting...</span>
+                        <div class="progress-bar">
+                            <div class="progress" style="width: 0%"></div>
+                        </div>
+                        <span class="progress-text">0%</span>
+                    `;
+                }
+                
+                // Call the API to start transcoding
+                const response = await fetch('/api/admin/transcode', {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to start transcoding process');
+                }
+                
+                showAlert('Transcoding process started', 'success');
+                
+                // Start polling for status updates
+                pollTranscodingStatus(videoId);
+                
+            } catch (error) {
+                console.error('Error starting transcoding:', error);
+                showAlert('Error starting transcoding: ' + error.message, 'danger');
+                
+                // Reset the status display
+                const statusDisplay = document.getElementById(`status-${videoId}`);
+                if (statusDisplay) {
+                    statusDisplay.innerHTML = `
+                        <span class="status-badge error">Error</span>
+                        <button class="btn btn-small start-transcode" data-uuid="${videoId}">Retry Transcoding</button>
+                    `;
+                }
+            }
+        }
+        
+        // Poll for transcoding status updates
+        function pollTranscodingStatus(videoId) {
+            const statusInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/video/${videoId}/status`);
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to get transcoding status');
+                    }
+                    
+                    const statusData = await response.json();
+                    const statusDisplay = document.getElementById(`status-${videoId}`);
+                    
+                    if (!statusDisplay) {
+                        clearInterval(statusInterval);
+                        return;
+                    }
+                    
+                    // Update the status display based on current status
+                    if (statusData.status === 'transcoding') {
+                        statusDisplay.innerHTML = `
+                            <span class="status-badge transcoding">Transcoding</span>
+                            <div class="progress-bar">
+                                <div class="progress" style="width: ${statusData.progress}%"></div>
+                            </div>
+                            <span class="progress-text">${statusData.progress}%</span>
+                        `;
+                    } else if (statusData.status === 'ready') {
+                        statusDisplay.innerHTML = `
+                            <span class="status-badge ready">Ready</span>
+                        `;
+                        clearInterval(statusInterval);
+                    } else if (statusData.status === 'error') {
+                        statusDisplay.innerHTML = `
+                            <span class="status-badge error">Error</span>
+                            <button class="btn btn-small start-transcode" data-uuid="${videoId}">Retry Transcoding</button>
+                        `;
+                        clearInterval(statusInterval);
+                    }
+                    
+                } catch (error) {
+                    console.error('Error polling transcoding status:', error);
+                    clearInterval(statusInterval);
+                }
+            }, 5000); // Poll every 5 seconds
+        }
+        
         // Make functions available globally
         window.openEditModal = openEditModal;
         window.openDeleteModal = openDeleteModal;
         window.copyToClipboard = copyToClipboard;
+        window.startTranscoding = startTranscoding;
     </script>
 </body>
 </html>
