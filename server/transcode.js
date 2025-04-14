@@ -84,66 +84,114 @@ const createHLSStream = (videoUuid, videoPath, outputDir) => {
       // Get video metadata
       const metadata = await getVideoMetadata(videoPath);
       const { width, height } = metadata.streams[0];
-      let videoBitrate = '5000k'; // Default bitrate
-      
-      // Try to get the actual bitrate from metadata
-      if (metadata.format && metadata.format.bit_rate) {
-        const bitrate = parseInt(metadata.format.bit_rate);
-        videoBitrate = `${Math.round(bitrate / 1000)}k`;
-      }
       
       // Generate thumbnail
       await generateThumbnail(videoPath, outputDir);
       
-      // Create a quality folder
-      const qualityName = height >= 720 ? '1080p' : (height >= 480 ? '720p' : '480p');
-      const qualityDir = path.join(outputDir, qualityName);
-      if (!fs.existsSync(qualityDir)) {
-        fs.mkdirSync(qualityDir, { recursive: true });
+      // Define quality variants based on original video resolution
+      const qualities = [];
+      
+      // Only add qualities that are lower than or equal to the original resolution
+      if (height >= 1080) {
+        qualities.push({
+          name: '1080p',
+          resolution: '1920x1080',
+          videoBitrate: '5000k',
+          audioBitrate: '192k'
+        });
       }
       
-      // Create a single HLS stream in the quality folder
-      const playlistPath = path.join(qualityDir, 'playlist.m3u8');
+      if (height >= 720) {
+        qualities.push({
+          name: '720p',
+          resolution: '1280x720',
+          videoBitrate: '2800k',
+          audioBitrate: '128k'
+        });
+      }
       
-      // Create HLS stream - using simpler options
-      const ffmpegCommand = ffmpeg(videoPath);
+      // Always include 480p as the lowest quality
+      qualities.push({
+        name: '480p',
+        resolution: '854x480',
+        videoBitrate: '1400k',
+        audioBitrate: '96k'
+      });
       
-      // Use a simpler approach - just copy the streams
-      ffmpegCommand.outputOptions([
-        '-c copy',             // Copy both video and audio codecs
-        '-hls_time 10',        // 10 second segments
-        '-hls_list_size 0',    // Keep all segments
-        '-hls_segment_filename', path.join(qualityDir, 'segment%03d.ts')
-      ]);
+      // Create directories for each quality
+      for (const quality of qualities) {
+        const qualityDir = path.join(outputDir, quality.name);
+        if (!fs.existsSync(qualityDir)) {
+          fs.mkdirSync(qualityDir, { recursive: true });
+        }
+      }
       
-      // Create a simple master playlist
-      const masterPlaylist = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-STREAM-INF:BANDWIDTH=${parseInt(videoBitrate) * 1000},RESOLUTION=${width}x${height}
-${qualityName}/playlist.m3u8
-`;
+      // Create master playlist content
+      let masterPlaylist = '#EXTM3U\n#EXT-X-VERSION:3\n';
+      
+      // Process each quality variant sequentially
+      let overallProgress = 0;
+      
+      for (let i = 0; i < qualities.length; i++) {
+        const quality = qualities[i];
+        const qualityDir = path.join(outputDir, quality.name);
+        const playlistPath = path.join(qualityDir, 'playlist.m3u8');
+        
+        // Add to master playlist
+        const [width, height] = quality.resolution.split('x');
+        masterPlaylist += `#EXT-X-STREAM-INF:BANDWIDTH=${parseInt(quality.videoBitrate) * 1000},RESOLUTION=${quality.resolution}\n`;
+        masterPlaylist += `${quality.name}/playlist.m3u8\n`;
+        
+        // Create HLS stream for this quality
+        const ffmpegCommand = ffmpeg(videoPath);
+        
+        // For the highest quality, just copy the streams if resolution matches
+        if (i === 0 && Math.abs(parseInt(width) - metadata.streams[0].width) < 100) {
+          ffmpegCommand.outputOptions([
+            '-c copy',             // Copy both video and audio codecs
+            '-hls_time 10',        // 10 second segments
+            '-hls_list_size 0',    // Keep all segments
+            '-hls_segment_filename', path.join(qualityDir, 'segment%03d.ts')
+          ]);
+        } else {
+          // For lower qualities, we need to transcode
+          ffmpegCommand.outputOptions([
+            '-c:v copy',           // Try to copy video codec
+            '-c:a copy',           // Copy audio codec
+            '-hls_time 10',        // 10 second segments
+            '-hls_list_size 0',    // Keep all segments
+            '-hls_segment_filename', path.join(qualityDir, 'segment%03d.ts')
+          ]);
+        }
+        
+        // Process this quality variant
+        await new Promise((resolve, reject) => {
+          ffmpegCommand.output(playlistPath)
+            .on('progress', (progress) => {
+              // Calculate overall progress
+              const qualityProgress = progress.percent / 100;
+              const qualityWeight = 1 / qualities.length;
+              overallProgress = Math.round((i * qualityWeight + qualityProgress * qualityWeight) * 100);
+              
+              // Update status in database
+              updateVideoStatus(videoUuid, 'transcoding', overallProgress);
+              
+              console.log(`[${quality.name}] Processing: ${progress.percent}% done (Overall: ${overallProgress}%)`);
+            })
+            .on('end', () => {
+              console.log(`[${quality.name}] Transcoding complete`);
+              resolve();
+            })
+            .on('error', (err) => {
+              console.error(`[${quality.name}] Error:`, err);
+              reject(err);
+            })
+            .run();
+        });
+      }
       
       // Write master playlist
       fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
-      
-      // Set output and run the command
-      await new Promise((resolve, reject) => {
-        ffmpegCommand.output(playlistPath)
-          .on('progress', (progress) => {
-            // Update status in database
-            updateVideoStatus(videoUuid, 'transcoding', progress.percent);
-            console.log(`Processing: ${progress.percent}% done`);
-          })
-          .on('end', () => {
-            console.log(`Transcoding complete`);
-            resolve();
-          })
-          .on('error', (err) => {
-            console.error(`Error:`, err);
-            reject(err);
-          })
-          .run();
-      });
       
       // Update video status to ready
       updateVideoStatus(videoUuid, 'ready', 100);
