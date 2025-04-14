@@ -1,0 +1,19 @@
+{
+  "videos": [
+    {
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "path": "sample_video",
+      "title": "Sample Video",
+      "description": "This is a sample video for testing purposes",
+      "dateAdded": "2025-04-14T12:00:00Z"
+    },
+    {
+      "uuid": "2c32a595-49d4-4dc9-bc66-04979683b0d7",
+      "path": "video_1744640824828",
+      "title": "76",
+      "description": "test",
+      "dateAdded": "2025-04-14T14:27:08.128Z",
+      "status": "ready"
+    }
+  ]
+}

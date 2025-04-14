@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stream Vault Admin</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .btn {
+            display: inline-block;
+            background-color: #3498db;
+            color: #fff;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        
+        .btn-danger {
+            background-color: #e74c3c;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c0392b;
+        }
+        
+        .video-list {
+            margin-top: 20px;
+        }
+        
+        .video-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .video-item h3 {
+            margin-top: 0;
+        }
+        
+        .video-actions {
+            margin-top: 10px;
+        }
+        
+        .video-actions button {
+            margin-right: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .form-group textarea {
+            height: 100px;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: #fff;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 5px;
+            width: 60%;
+            max-width: 500px;
+        }
+        
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #333;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 10px 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .video-url {
+            word-break: break-all;
+            background-color: #eee;
+            padding: 5px;
+            border-radius: 3px;
+            font-family: monospace;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Stream Vault Admin</h1>
+            <button id="uploadBtn" class="btn">Upload New Video</button>
+        </div>
+        
+        <div id="alertContainer"></div>
+        
+        <div id="videoList" class="video-list">
+            <div class="loader" id="loader"></div>
+            <div id="noVideosMessage" class="hidden">No videos found. Upload a video to get started.</div>
+        </div>
+    </div>
+    
+    <!-- Upload Modal -->
+    <div id="uploadModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="closeUploadModal">&times;</span>
+            <h2>Upload New Video</h2>
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label for="title">Title</label>
+                    <input type="text" id="title" name="title" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <textarea id="description" name="description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="videoFile">Video File</label>
+                    <input type="file" id="videoFile" name="video" accept="video/*" required>
+                </div>
+                <button type="submit" class="btn">Upload</button>
+            </form>
+            <div id="uploadProgress" class="hidden">
+                <p>Uploading video... This may take a while depending on the file size.</p>
+                <div class="loader"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="closeEditModal">&times;</span>
+            <h2>Edit Video</h2>
+            <form id="editForm">
+                <input type="hidden" id="editVideoId">
+                <div class="form-group">
+                    <label for="editTitle">Title</label>
+                    <input type="text" id="editTitle" name="title" required>
+                </div>
+                <div class="form-group">
+                    <label for="editDescription">Description</label>
+                    <textarea id="editDescription" name="description"></textarea>
+                </div>
+                <button type="submit" class="btn">Save Changes</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="closeDeleteModal">&times;</span>
+            <h2>Confirm Delete</h2>
+            <p>Are you sure you want to delete this video? This action cannot be undone.</p>
+            <input type="hidden" id="deleteVideoId">
+            <button id="confirmDelete" class="btn btn-danger">Delete</button>
+            <button id="cancelDelete" class="btn">Cancel</button>
+        </div>
+    </div>
+    
+    <script>
+        // DOM Elements
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadModal = document.getElementById('uploadModal');
+        const closeUploadModal = document.getElementById('closeUploadModal');
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadProgress = document.getElementById('uploadProgress');
+        
+        const editModal = document.getElementById('editModal');
+        const closeEditModal = document.getElementById('closeEditModal');
+        const editForm = document.getElementById('editForm');
+        
+        const deleteModal = document.getElementById('deleteModal');
+        const closeDeleteModal = document.getElementById('closeDeleteModal');
+        const confirmDelete = document.getElementById('confirmDelete');
+        const cancelDelete = document.getElementById('cancelDelete');
+        
+        const videoList = document.getElementById('videoList');
+        const loader = document.getElementById('loader');
+        const noVideosMessage = document.getElementById('noVideosMessage');
+        const alertContainer = document.getElementById('alertContainer');
+        
+        // Event Listeners
+        uploadBtn.addEventListener('click', () => {
+            uploadModal.style.display = 'block';
+        });
+        
+        closeUploadModal.addEventListener('click', () => {
+            uploadModal.style.display = 'none';
+        });
+        
+        closeEditModal.addEventListener('click', () => {
+            editModal.style.display = 'none';
+        });
+        
+        closeDeleteModal.addEventListener('click', () => {
+            deleteModal.style.display = 'none';
+        });
+        
+        cancelDelete.addEventListener('click', () => {
+            deleteModal.style.display = 'none';
+        });
+        
+        // Close modals when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target === uploadModal) uploadModal.style.display = 'none';
+            if (e.target === editModal) editModal.style.display = 'none';
+            if (e.target === deleteModal) deleteModal.style.display = 'none';
+        });
+        
+        // Form Submissions
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(uploadForm);
+            const fileInput = document.getElementById('videoFile');
+            
+            if (!fileInput.files[0]) {
+                showAlert('Please select a video file to upload.', 'danger');
+                return;
+            }
+            
+            uploadForm.style.display = 'none';
+            uploadProgress.style.display = 'block';
+            
+            try {
+                const response = await fetch('/api/admin/videos', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to upload video');
+                }
+                
+                const data = await response.json();
+                showAlert('Video uploaded successfully!', 'success');
+                uploadModal.style.display = 'none';
+                uploadForm.reset();
+                uploadForm.style.display = 'block';
+                uploadProgress.style.display = 'none';
+                
+                // Refresh the video list
+                loadVideos();
+                
+            } catch (error) {
+                console.error('Error uploading video:', error);
+                showAlert('Error uploading video: ' + error.message, 'danger');
+                uploadForm.style.display = 'block';
+                uploadProgress.style.display = 'none';
+            }
+        });
+        
+        editForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const videoId = document.getElementById('editVideoId').value;
+            const title = document.getElementById('editTitle').value;
+            const description = document.getElementById('editDescription').value;
+            
+            try {
+                const response = await fetch(`/api/admin/videos/${videoId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ title, description })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to update video');
+                }
+                
+                showAlert('Video updated successfully!', 'success');
+                editModal.style.display = 'none';
+                
+                // Refresh the video list
+                loadVideos();
+                
+            } catch (error) {
+                console.error('Error updating video:', error);
+                showAlert('Error updating video: ' + error.message, 'danger');
+            }
+        });
+        
+        confirmDelete.addEventListener('click', async () => {
+            const videoId = document.getElementById('deleteVideoId').value;
+            
+            try {
+                const response = await fetch(`/api/admin/videos/${videoId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to delete video');
+                }
+                
+                showAlert('Video deleted successfully!', 'success');
+                deleteModal.style.display = 'none';
+                
+                // Refresh the video list
+                loadVideos();
+                
+            } catch (error) {
+                console.error('Error deleting video:', error);
+                showAlert('Error deleting video: ' + error.message, 'danger');
+                deleteModal.style.display = 'none';
+            }
+        });
+        
+        // Helper Functions
+        function showAlert(message, type) {
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            
+            alertContainer.innerHTML = '';
+            alertContainer.appendChild(alert);
+            
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+        
+        function openEditModal(video) {
+            document.getElementById('editVideoId').value = video.uuid;
+            document.getElementById('editTitle').value = video.title;
+            document.getElementById('editDescription').value = video.description;
+            editModal.style.display = 'block';
+        }
+        
+        function openDeleteModal(videoId) {
+            document.getElementById('deleteVideoId').value = videoId;
+            deleteModal.style.display = 'block';
+        }
+        
+        function createVideoElement(video) {
+            const videoItem = document.createElement('div');
+            videoItem.className = 'video-item';
+            
+            const playerUrl = `${window.location.origin}/player/${video.uuid}`;
+            
+            videoItem.innerHTML = `
+                <h3>${video.title}</h3>
+                <p>${video.description || 'No description'}</p>
+                <p><strong>Added:</strong> ${new Date(video.dateAdded).toLocaleString()}</p>
+                <div class="video-url">
+                    <strong>Player URL:</strong> ${playerUrl}
+                </div>
+                <div class="video-actions">
+                    <button class="btn" onclick="window.open('${playerUrl}', '_blank')">View</button>
+                    <button class="btn" onclick="copyToClipboard('${playerUrl}')">Copy URL</button>
+                    <button class="btn" onclick="openEditModal(${JSON.stringify(video).replace(/"/g, '&quot;')})">Edit</button>
+                    <button class="btn btn-danger" onclick="openDeleteModal('${video.uuid}')">Delete</button>
+                </div>
+            `;
+            
+            return videoItem;
+        }
+        
+        async function loadVideos() {
+            loader.style.display = 'block';
+            videoList.querySelectorAll('.video-item').forEach(item => item.remove());
+            
+            try {
+                const response = await fetch('/api/videos');
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch videos');
+                }
+                
+                const videos = await response.json();
+                
+                loader.style.display = 'none';
+                
+                if (videos.length === 0) {
+                    noVideosMessage.classList.remove('hidden');
+                } else {
+                    noVideosMessage.classList.add('hidden');
+                    
+                    videos.forEach(video => {
+                        const videoElement = createVideoElement(video);
+                        videoList.appendChild(videoElement);
+                    });
+                }
+                
+            } catch (error) {
+                console.error('Error loading videos:', error);
+                loader.style.display = 'none';
+                showAlert('Error loading videos: ' + error.message, 'danger');
+            }
+        }
+        
+        function copyToClipboard(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            showAlert('URL copied to clipboard!', 'success');
+        }
+        
+        // Make functions available globally
+        window.openEditModal = openEditModal;
+        window.openDeleteModal = openDeleteModal;
+        window.copyToClipboard = copyToClipboard;
+        
+        // Load videos on page load
+        document.addEventListener('DOMContentLoaded', loadVideos);
+    </script>
+</body>
+</html>

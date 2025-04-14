@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stream Vault Player</title>
+    <!-- Include Video.js CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.21.1/video-js.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: transparent;
+            overflow: hidden;
+            height: 100%;
+            width: 100%;
+        }
+
+        html {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .video-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        .video-js {
+            width: 100% !important;
+            height: 100% !important;
+            position: absolute;
+        }
+
+        /* Custom quality selection menu styling */
+        .vjs-quality-selector .vjs-menu-button {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+        }
+        .vjs-quality-selector .vjs-icon-placeholder {
+            font-family: 'VideoJS';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 1.2em;
+            line-height: 2;
+        }
+        .vjs-quality-selector {
+            width: 4em !important;
+        }
+        .vjs-quality-selector .vjs-icon-placeholder:before {
+            content: '\f110';
+        }
+        .vjs-menu-content {
+            padding: 0;
+            margin: 0;
+        }
+
+        /* Custom quality menu item */
+        .quality-menu-item {
+            font-size: 14px;
+            padding: 6px 10px;
+            cursor: pointer;
+            text-align: left;
+            transition: background-color 0.2s;
+        }
+        .quality-menu-item:hover {
+            background-color: rgba(115, 133, 159, 0.5);
+        }
+        .quality-menu-item.selected {
+            background-color: rgba(115, 133, 159, 0.8);
+        }
+        
+        /* Error message styling */
+        .error-message {
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <!-- The video player element -->
+        <video
+            id="my-video"
+            class="video-js vjs-default-skin vjs-big-play-centered"
+            controls
+            preload="auto">
+            <!-- Video sources will be inserted dynamically by JavaScript -->
+        </video>
+    </div>
+
+    <!-- Include Video.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.21.1/video.min.js"></script>
+    <!-- Include HLS support for Video.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/videojs-http-streaming/2.16.2/videojs-http-streaming.min.js"></script>
+
+    <script>
+        // Register a custom Video.js component for quality selection
+        const videojs = window.videojs;
+        const Component = videojs.getComponent('Component');
+        const MenuButton = videojs.getComponent('MenuButton');
+        const MenuItem = videojs.getComponent('MenuItem');
+        const Menu = videojs.getComponent('Menu');
+
+        // Create a custom menu item for quality selection
+        class QualityMenuItem extends MenuItem {
+            constructor(player, options) {
+                super(player, {
+                    label: options.label,
+                    selectable: true,
+                    selected: options.selected || false
+                });
+                this.representation = options.representation;
+                this.qualityIndex = options.qualityIndex;
+                this.qualityLabel = options.label;
+            }
+
+            handleClick() {
+                try {
+                    console.log(`Quality selected: ${this.qualityLabel}`);
+
+                    // When clicked, select this quality
+                    // In VideoJS, parent might be a property not a function
+                    const menu = this.parentComponent_;
+                    if (menu && typeof menu.children === 'function') {
+                        const items = menu.children();
+
+                        // Update selected states
+                        for (let i = 0; i < items.length; i++) {
+                            const item = items[i];
+                            if (item && typeof item.selected === 'function') {
+                                item.selected(item === this);
+                            }
+                        }
+                    }
+
+                    // Update quality
+                    const tech = this.player_.tech_;
+                    if (!tech || !tech.vhs) {
+                        console.log("Tech or VHS not available for quality selection");
+                        return;
+                    }
+
+                    try {
+                        if (this.representation) {
+                            // Using representation object
+                            if (typeof tech.vhs.representations === 'function') {
+                                const representations = tech.vhs.representations();
+
+                                if (representations && representations.length > 0) {
+                                    // If we have a specific index
+                                    if (typeof this.representation.index === 'number') {
+                                        console.log(`Enabling representation at index ${this.representation.index}`);
+
+                                        // Set this representation as the current one
+                                        representations[this.representation.index].enabled(true);
+
+                                        // Set all others to disabled
+                                        representations.forEach((rep, idx) => {
+                                            if (idx !== this.representation.index) {
+                                                rep.enabled(false);
+                                            }
+                                        });
+                                    }
+                                    // If we have a specific height to match
+                                    else if (this.representation.height) {
+                                        console.log(`Looking for representation with height ${this.representation.height}`);
+
+                                        // Find the representation with matching height
+                                        let found = false;
+                                        representations.forEach((rep, idx) => {
+                                            if (rep.height === this.representation.height) {
+                                                console.log(`Found matching representation at index ${idx}`);
+                                                rep.enabled(true);
+                                                found = true;
+                                            } else {
+                                                rep.enabled(false);
+                                            }
+                                        });
+
+                                        if (!found) {
+                                            console.log("No matching representation found, enabling all");
+                                            representations.forEach(rep => rep.enabled(true));
+                                        }
+                                    }
+                                } else {
+                                    console.log("No representations available");
+                                }
+                            } else {
+                                console.log("VHS representations function not available");
+                            }
+                        } else {
+                            // Auto option - enable all representations
+                            console.log("Auto quality selected, enabling all representations");
+                            if (typeof tech.vhs.representations === 'function') {
+                                const representations = tech.vhs.representations();
+                                if (representations) {
+                                    representations.forEach(rep => rep.enabled(true));
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error("Error setting quality:", error);
+                    }
+
+                    // Update the button text to show current selection
+                    try {
+                        const button = this.player_.controlBar.getChild('qualitySelector');
+                        if (button && button.buttonText) {
+                            button.buttonText.innerHTML = this.options_.label;
+                        }
+                    } catch (error) {
+                        console.error("Error updating button text:", error);
+                    }
+                } catch (error) {
+                    console.error("Error in handleClick:", error);
+                }
+            }
+        }
+
+        // Create a custom menu button for quality selection
+        class QualitySelectorButton extends MenuButton {
+            constructor(player, options) {
+                super(player, options);
+
+                // Set control text for screen readers
+                this.controlText('Quality');
+
+                // Create a text element to display the current selection
+                this.buttonText = document.createElement('span');
+                this.buttonText.className = 'vjs-quality-selector-button-text';
+                this.buttonText.innerHTML = 'Auto';
+
+                // Add the text element to the button
+                if (this.el()) {
+                    this.el().appendChild(this.buttonText);
+
+                    // Ensure the text is visible but smaller
+                    this.buttonText.style.display = 'inline-block';
+                    this.buttonText.style.lineHeight = '3em';
+                    this.buttonText.style.fontSize = '0.7em';
+                    this.buttonText.style.marginLeft = '2px';
+
+                    // Create a custom class for the button
+                    this.addClass('vjs-quality-selector');
+                }
+
+                // Initialize the menu - we'll create it here instead of relying on parent class
+                this.menu = new Menu(this.player_, {});
+                this.addChild(this.menu);
+
+                // Customize the menu's addItem method
+                this.menu.addItem = function(component) {
+                    this.addChild(component);
+                    component.on('click', videojs.bind(this, function() {
+                        this.unlockShowing();
+                    }));
+                };
+
+                // Initial populate the menu
+                this.updateMenu();
+
+                // Update the menu when the tech is set up
+                this.player_.on('loadedmetadata', () => {
+                    console.log("Metadata loaded, updating quality menu");
+                    this.updateMenu();
+                });
+            }
+
+            createItems() {
+                const items = [];
+                const tech = this.player_.tech_;
+
+                if (!tech) {
+                    console.log("Tech not available for quality menu");
+                    return items;
+                }
+
+                // Add Auto option
+                items.push(new QualityMenuItem(this.player_, {
+                    label: 'Auto',
+                    representation: null,
+                    selected: true
+                }));
+
+                try {
+                    // If we have the representations api...
+                    if (tech.vhs && typeof tech.vhs.representations === 'function') {
+                        const representations = tech.vhs.representations();
+
+                        if (representations && representations.length > 0) {
+                            console.log(`Found ${representations.length} quality representations`);
+
+                            // Sort by height (resolution) in descending order
+                            representations.sort((a, b) => b.height - a.height);
+
+                            representations.forEach((representation, index) => {
+                                if (representation && representation.height) {
+                                    const label = `${representation.height}p`;
+                                    console.log(`Adding quality option: ${label}`);
+
+                                    // Store the index for later use
+                                    representation.index = index;
+
+                                    items.push(new QualityMenuItem(this.player_, {
+                                        label: label,
+                                        representation: representation,
+                                        qualityIndex: index,
+                                        selected: false
+                                    }));
+                                }
+                            });
+                        } else {
+                            console.log("No representations found or empty array");
+                            this.addManualQualityOptions(items);
+                        }
+                    } else {
+                        console.log("VHS representations API not available");
+                        this.addManualQualityOptions(items);
+                    }
+                } catch (error) {
+                    console.error("Error creating quality items:", error);
+                    this.addManualQualityOptions(items);
+                }
+
+                return items;
+            }
+
+            // Add manual quality options when the API doesn't provide them
+            addManualQualityOptions(items) {
+                console.log("Adding manual quality options");
+
+                // Add 1080p option
+                items.push(new QualityMenuItem(this.player_, {
+                    label: '1080p',
+                    representation: { height: 1080 },
+                    qualityIndex: 0,
+                    selected: false
+                }));
+
+                // Add 480p option
+                items.push(new QualityMenuItem(this.player_, {
+                    label: '480p',
+                    representation: { height: 480 },
+                    qualityIndex: 1,
+                    selected: false
+                }));
+            }
+
+            updateMenu() {
+                try {
+                    console.log("Updating quality menu");
+
+                    // Clear the menu if it exists
+                    if (this.menu) {
+                        // Remove all items
+                        while (this.menu.children_ && this.menu.children_.length) {
+                            this.menu.removeChild(this.menu.children_[0]);
+                        }
+
+                        // Create and add new items
+                        const items = this.createItems();
+                        for (let i = 0; i < items.length; i++) {
+                            this.menu.addItem(items[i]);
+                        }
+                    } else {
+                        console.log("Menu not initialized");
+                    }
+                } catch (error) {
+                    console.error("Error updating menu:", error);
+                }
+            }
+
+            buildCSSClass() {
+                return `vjs-quality-selector ${super.buildCSSClass()}`;
+            }
+        }
+
+        // Register the component
+        videojs.registerComponent('QualitySelectorButton', QualitySelectorButton);
+
+        // Use the component
+        videojs.registerPlugin('qualitySelector', function() {
+            const player = this;
+
+            player.ready(() => {
+                console.log("Player ready, setting up quality selector");
+
+                // Add the quality selector button to the control bar immediately
+                try {
+                    const qualitySelector = player.controlBar.addChild('qualitySelectorButton', {});
+
+                    // Position it before the fullscreen button
+                    const fullscreenToggle = player.controlBar.getChild('fullscreenToggle');
+                    if (fullscreenToggle && fullscreenToggle.el() && qualitySelector && qualitySelector.el()) {
+                        player.controlBar.el().insertBefore(
+                            qualitySelector.el(),
+                            fullscreenToggle.el()
+                        );
+                        console.log("Quality selector added to control bar");
+                    } else {
+                        console.log("Could not position quality selector, elements not found");
+                    }
+                } catch (error) {
+                    console.error("Error adding quality selector:", error);
+                }
+            });
+        });
+
+        // Get video UUID from URL path
+        const pathParts = window.location.pathname.split('/');
+        const videoUuid = pathParts[pathParts.length - 1];
+
+        if (videoUuid) {
+            console.log(`Initializing player for video UUID: ${videoUuid}`);
+
+            // Fetch the stream URL from the API
+            fetch(`/api/stream/${videoUuid}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Video not found');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const videoUrl = data.streamUrl;
+                    console.log("Video URL:", videoUrl);
+
+                    // Initialize the video player with options
+                    const player = videojs('my-video', {
+                        fluid: false,      // We'll handle responsiveness with CSS
+                        responsive: true,
+                        fill: true,        // Fill the entire container
+                        playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
+                        controlBar: {
+                            children: [
+                                'playToggle',
+                                'volumePanel',
+                                'currentTimeDisplay',
+                                'timeDivider',
+                                'durationDisplay',
+                                'progressControl',
+                                'remainingTimeDisplay',
+                                'playbackRateMenuButton', // Playback speed
+                                'fullscreenToggle'
+                                // Quality selector will be added dynamically
+                            ]
+                        },
+                        html5: {
+                            vhs: {
+                                overrideNative: true,
+                                withCredentials: false,
+                                handleManifestRedirects: true,
+                                handlePartialData: true
+                            },
+                            nativeTextTracks: false
+                        }
+                    });
+
+                    // Initialize the quality selector plugin
+                    player.qualitySelector();
+
+                    // Set up the video source
+                    player.src({
+                        src: videoUrl,
+                        type: 'application/x-mpegURL'
+                    });
+
+                    // Add error handling
+                    player.on('error', function() {
+                        console.error('Video error:', player.error());
+                        // Display a more helpful error message
+                        const errorDiv = document.createElement('div');
+                        errorDiv.innerHTML = `
+                            <div class="error-message">
+                                <h2>Video Error</h2>
+                                <p>Error code: ${player.error().code}</p>
+                                <p>Details: ${player.error().message}</p>
+                                <p>URL attempted: ${videoUrl}</p>
+                                <p>Try testing the direct URL: <a href="${videoUrl}" style="color: lightblue;" target="_blank">Open HLS stream directly</a></p>
+                            </div>
+                        `;
+                        document.querySelector('.video-container').appendChild(errorDiv);
+                    });
+
+                    // Add debugging for quality representations
+                    player.on('loadedmetadata', function() {
+                        console.log("Video metadata loaded");
+
+                        // Log available quality levels
+                        try {
+                            const tech = player.tech_;
+                            if (tech && tech.vhs && typeof tech.vhs.representations === 'function') {
+                                const representations = tech.vhs.representations();
+                                if (representations && representations.length) {
+                                    console.log(`Available quality levels (${representations.length}):`);
+                                    representations.forEach((rep, idx) => {
+                                        console.log(`- Quality ${idx}: ${rep.height}p (${rep.bandwidth} bps)`);
+                                    });
+                                } else {
+                                    console.log("No quality representations found");
+                                }
+                            } else {
+                                console.log("VHS representations API not available");
+                            }
+                        } catch (error) {
+                            console.error("Error checking quality levels:", error);
+                        }
+                    });
+
+                    // Handle browser resize events to ensure the player always fits properly
+                    window.addEventListener('resize', function() {
+                        player.dimensions(window.innerWidth, window.innerHeight);
+                    });
+
+                    // Make player responsive to parent iframe size changes
+                    function checkSize() {
+                        if (window.parent !== window) {
+                            player.dimensions(window.innerWidth, window.innerHeight);
+                        }
+                        setTimeout(checkSize, 500); // Check every half-second
+                    }
+                    checkSize();
+                })
+                .catch(error => {
+                    console.error('Error fetching video:', error);
+                    document.querySelector('.video-container').innerHTML = `
+                        <div class="error-message">
+                            <h2>Video Not Found</h2>
+                            <p>The requested video could not be loaded.</p>
+                            <p>Error: ${error.message}</p>
+                        </div>
+                    `;
+                });
+        } else {
+            document.querySelector('.video-container').innerHTML = `
+                <div class="error-message">
+                    <h2>Video ID Not Specified</h2>
+                    <p>Please provide a valid video UUID in the URL.</p>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

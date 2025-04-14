@@ -1,0 +1,7 @@
+media/*
+upload/
+node_modules
+package-lock.json
+.vscode
+.DS_Store
+.idea
