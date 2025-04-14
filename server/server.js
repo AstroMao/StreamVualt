@@ -86,12 +86,25 @@ app.get('/api/video/:uuid', (req, res) => {
     return res.status(404).json({ error: 'Video not found' });
   }
   
+  // Check for available quality variants
+  const videoPath = path.join(__dirname, '../media', video.path);
+  const qualities = [];
+  
+  // Check for common quality folders
+  ['1080p', '720p', '480p'].forEach(quality => {
+    const qualityPath = path.join(videoPath, quality);
+    if (fs.existsSync(qualityPath) && fs.existsSync(path.join(qualityPath, 'playlist.m3u8'))) {
+      qualities.push(quality);
+    }
+  });
+  
   // Return video details without exposing the actual path
   res.json({
     uuid: video.uuid,
     title: video.title,
     description: video.description,
-    dateAdded: video.dateAdded
+    dateAdded: video.dateAdded,
+    qualities: qualities
   });
 });
 

@@ -92,7 +92,7 @@ const createHLSStream = (videoUuid, videoPath, outputDir) => {
       const qualities = [];
       
       // Only add qualities that are lower than or equal to the original resolution
-      if (height >= 1080) {
+      if (height >= 900) {
         qualities.push({
           name: '1080p',
           resolution: '1920x1080',
