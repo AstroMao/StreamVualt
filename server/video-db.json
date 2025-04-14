@@ -1,13 +1,6 @@
 {
   "videos": [
     {
-      "uuid": "550e8400-e29b-41d4-a716-446655440000",
-      "path": "sample_video",
-      "title": "Sample Video",
-      "description": "This is a sample video for testing purposes",
-      "dateAdded": "2025-04-14T12:00:00Z"
-    },
-    {
       "uuid": "e7dc868d-2551-4ba1-a17d-1a20096e1c8b",
       "path": "video_1744645557630",
       "title": "76",
@@ -16,22 +9,14 @@
       "status": "ready"
     },
     {
-      "uuid": "6dd4b782-480c-44a8-ac20-b6efc8eee872",
-      "path": "video_1744670906300",
-      "title": "asd",
-      "description": "asd",
-      "dateAdded": "2025-04-14T22:48:26.300Z",
-      "status": "ready",
-      "transcodeProgress": 100
-    },
-    {
-      "uuid": "22c4990f-e9c1-441b-ad18-d28bdf1d646b",
-      "path": "video_1744671541648",
-      "title": "32123",
-      "description": "3213",
-      "dateAdded": "2025-04-14T22:59:01.649Z",
-      "status": "ready",
-      "transcodeProgress": 100
+      "uuid": "6c0038cc-1d2c-4095-815e-e777fd9adac4",
+      "path": "video_1744673296229",
+      "title": "123",
+      "description": "123",
+      "dateAdded": "2025-04-14T23:28:16.229Z",
+      "status": "error",
+      "transcodeQuality": "all",
+      "transcodeProgress": 0
     }
   ]
 }

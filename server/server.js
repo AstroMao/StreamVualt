@@ -91,7 +91,7 @@ app.get('/api/video/:uuid', (req, res) => {
   const qualities = [];
   
   // Check for common quality folders
-  ['1080p', '720p', '480p'].forEach(quality => {
+  ['1080p', '720p', '480p', '360p'].forEach(quality => {
     const qualityPath = path.join(videoPath, quality);
     if (fs.existsSync(qualityPath) && fs.existsSync(path.join(qualityPath, 'playlist.m3u8'))) {
       qualities.push(quality);
@@ -353,12 +353,79 @@ app.get('/api/video/:uuid/status', (req, res) => {
 
 // Start transcoding process (admin only)
 app.post('/api/admin/transcode', (req, res) => {
-  // Start the transcoding process in the background
-  processTranscodingQueue().catch(err => {
-    console.error('Error in transcoding queue:', err);
-  });
+  const { videoId, quality, encodingOptions } = req.body || {};
   
-  res.json({ message: 'Transcoding process started' });
+  // Parse encoding options
+  const transcodingOptions = {};
+  
+  // Add encoding options if provided
+  if (encodingOptions) {
+    // Video codec (e.g., libx264, libx265)
+    if (encodingOptions.videoCodec) {
+      transcodingOptions.videoCodec = encodingOptions.videoCodec;
+    }
+    
+    // Audio codec (e.g., aac, libopus)
+    if (encodingOptions.audioCodec) {
+      transcodingOptions.audioCodec = encodingOptions.audioCodec;
+    }
+    
+    // Encoding preset (e.g., ultrafast, fast, medium, slow)
+    if (encodingOptions.preset) {
+      transcodingOptions.preset = encodingOptions.preset;
+    }
+    
+    // Force transcoding even for highest quality
+    if (encodingOptions.forceTranscode === true) {
+      transcodingOptions.forceTranscode = true;
+    }
+  }
+  
+  console.log('Transcoding options:', transcodingOptions);
+  
+  // Start the transcoding process in the background
+  if (videoId) {
+    // If a specific videoId is provided, only transcode that video
+    const db = readVideoDB();
+    const video = db.videos.find(v => v.uuid === videoId);
+    
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    // Update video status to pending_transcode
+    video.status = 'pending_transcode';
+    video.transcodeQuality = quality || 'all'; // Store the requested quality
+    
+    // Store encoding options for this specific video if provided
+    if (Object.keys(transcodingOptions).length > 0) {
+      video.encodingOptions = transcodingOptions;
+    }
+    
+    if (writeVideoDB(db)) {
+      // Start the transcoding process for this video
+      processTranscodingQueue(transcodingOptions).catch(err => {
+        console.error('Error in transcoding queue:', err);
+      });
+      
+      return res.json({ 
+        message: 'Transcoding process started for video: ' + videoId,
+        options: transcodingOptions
+      });
+    } else {
+      return res.status(500).json({ error: 'Failed to update video status' });
+    }
+  } else {
+    // Start the transcoding process for all pending videos
+    processTranscodingQueue(transcodingOptions).catch(err => {
+      console.error('Error in transcoding queue:', err);
+    });
+    
+    res.json({ 
+      message: 'Transcoding process started for all pending videos',
+      options: transcodingOptions
+    });
+  }
 });
 
 // Start the server
@@ -368,7 +435,16 @@ app.listen(PORT, () => {
   // Check for videos that need transcoding on startup
   setTimeout(() => {
     console.log('Checking for videos that need transcoding...');
-    processTranscodingQueue().catch(err => {
+    
+    // Default encoding options for startup transcoding
+    const defaultOptions = {
+      videoCodec: 'libx264',
+      audioCodec: 'aac',
+      preset: 'medium',
+      forceTranscode: false
+    };
+    
+    processTranscodingQueue(defaultOptions).catch(err => {
       console.error('Error in transcoding queue:', err);
     });
   }, 5000); // Wait 5 seconds after server start
