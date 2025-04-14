@@ -9,7 +9,7 @@ Stream Vault is a lightweight video streaming platform that allows you to:
 - Upload and manage video content
 - Stream videos using HLS (HTTP Live Streaming)
 - Share videos via UUID-based URLs instead of exposing file paths
-- Manage videos through a simple admin interface
+- Manage videos through a simple admin interface.
 
 This project is designed to be simple yet functional, focusing on the core features needed for video streaming without unnecessary complexity.
 
