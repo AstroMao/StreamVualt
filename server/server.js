@@ -2,11 +2,16 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const { pipeline } = require('stream');
+const { promisify } = require('util');
 // Import required modules
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const unzipper = require('unzipper');
 const { conditionalAuth } = require('./auth');
+
+// Promisify the pipeline function
+const pipelineAsync = promisify(pipeline);
 
 // Initialize Express app
 const app = express();
@@ -123,21 +128,67 @@ app.post('/api/admin/videos', upload.single('video'), async (req, res) => {
     
     if (fileExt === '.zip') {
       // Handle zip file upload (HLS package)
-      await fs.createReadStream(req.file.path)
-        .pipe(unzipper.Extract({ path: videoPath }))
-        .promise()
-        .catch(err => {
-          console.error('Error extracting zip:', err);
-          return res.status(500).json({ error: 'Failed to extract HLS package' });
-        })
-        .finally(() => {
-          // Remove uploaded zip file after processing
-          try {
-            fs.rmSync(req.file.path);
-          } catch (err) {
-            console.error('Error removing uploaded zip file:', err);
+      try {
+        console.log(`Processing zip file: ${req.file.originalname}`);
+        
+        // Extract zip contents without preserving top-level directory structure
+        const directory = await unzipper.Open.file(req.file.path);
+        
+        // Get all paths to identify potential common root directory
+        const allPaths = directory.files
+          .filter(entry => entry.type !== 'Directory')
+          .map(entry => entry.path);
+        
+        console.log(`Found ${allPaths.length} files in zip`);
+        
+        // Check if all files are in a common directory
+        let commonPrefix = '';
+        if (allPaths.length > 0) {
+          const firstPath = allPaths[0];
+          const firstDir = firstPath.split('/')[0];
+          
+          // If all files start with the same directory, we'll strip it
+          if (firstDir && allPaths.every(p => p.startsWith(firstDir + '/'))) {
+            commonPrefix = firstDir + '/';
+            console.log(`Detected common prefix: ${commonPrefix}`);
           }
-        });
+        }
+        
+        // Process each entry in the zip file
+        for (const entry of directory.files) {
+          // Skip directories, we'll create them as needed
+          if (entry.type === 'Directory') continue;
+          
+          // Remove common prefix if it exists to avoid creating an extra directory
+          let relativePath = entry.path;
+          if (commonPrefix && relativePath.startsWith(commonPrefix)) {
+            relativePath = relativePath.substring(commonPrefix.length);
+          }
+          
+          // Create the target path for the file
+          const targetPath = path.join(videoPath, relativePath);
+          console.log(`Extracting: ${entry.path} -> ${targetPath}`);
+          
+          // Ensure the directory exists
+          const targetDir = path.dirname(targetPath);
+          fs.mkdirSync(targetDir, { recursive: true });
+          
+          // Extract the file using promisified pipeline
+          await pipelineAsync(
+            entry.stream(),
+            fs.createWriteStream(targetPath)
+          );
+        }
+        
+        console.log('Zip extraction completed successfully');
+        
+        // Remove uploaded zip file after processing
+        fs.rmSync(req.file.path);
+      } catch (err) {
+        console.error('Error extracting zip:', err);
+        console.error(err.stack);
+        return res.status(500).json({ error: 'Failed to extract HLS package' });
+      }
     } else {
       // Handle single video file upload
       const originalPath = path.join(videoPath, 'original');
