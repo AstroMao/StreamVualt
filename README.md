@@ -198,11 +198,15 @@ If you're upgrading from a previous version that used JSON file storage, you can
 
 ### Authentication
 
-Default login:
-- Username: `admin`
-- Password: `password`
+Default login credentials are stored in the PostgreSQL database. During database initialization, two default users are created:
+- Username: `admin`, Password: `admin123`, Role: `admin`
+- Username: `user`, Password: `user123`, Role: `user`
 
-**Important**: Change these credentials in `server/auth.js` before deploying to production.
+To change these credentials or manage users:
+1. Connect to your PostgreSQL database
+2. Use the `users` table to modify existing users or add new ones
+3. The password is stored in plain text currently (for development purposes)
+4. For production, consider implementing proper password hashing (e.g., using bcrypt)
 
 ### Adding Videos
 
