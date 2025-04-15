@@ -189,7 +189,11 @@ app.post('/api/admin/videos', upload.single('video'), async (req, res) => {
       // Handle single video file upload
       const originalPath = path.join(videoPath, 'original');
       fs.mkdirSync(originalPath, { recursive: true });
-      fs.renameSync(req.file.path, path.join(originalPath, req.file.originalname));
+      // Use stream copy instead of rename to handle cross-filesystem move
+      const source = fs.createReadStream(req.file.path);
+      const destination = fs.createWriteStream(path.join(originalPath, req.file.originalname));
+      await pipelineAsync(source, destination);
+      fs.rmSync(req.file.path);
     }
     
     // Add entry to database
