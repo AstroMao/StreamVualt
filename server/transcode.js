@@ -2,47 +2,17 @@ const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const { v4: uuidv4 } = require('uuid');
-
-// Read the video database
-const readVideoDB = () => {
-  try {
-    const data = fs.readFileSync(path.join(__dirname, 'video-db.json'), 'utf8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('Error reading video database:', err);
-    return { videos: [] };
-  }
-};
-
-// Write to the video database
-const writeVideoDB = (data) => {
-  try {
-    fs.writeFileSync(
-      path.join(__dirname, 'video-db.json'),
-      JSON.stringify(data, null, 2),
-      'utf8'
-    );
-    return true;
-  } catch (err) {
-    console.error('Error writing to video database:', err);
-    return false;
-  }
-};
+const db = require('./db');
 
 // Update video status in the database
-const updateVideoStatus = (uuid, status, progress = 0) => {
-  const db = readVideoDB();
-  const videoIndex = db.videos.findIndex(v => v.uuid === uuid);
-  
-  if (videoIndex === -1) {
-    console.error(`Video with UUID ${uuid} not found`);
+const updateVideoStatus = async (uuid, status, progress = 0) => {
+  try {
+    await db.updateVideoStatus(uuid, status, progress);
+    return true;
+  } catch (err) {
+    console.error(`Error updating status for video with UUID ${uuid}:`, err);
     return false;
   }
-  
-  db.videos[videoIndex].status = status;
-  db.videos[videoIndex].transcodeProgress = progress;
-  
-  return writeVideoDB(db);
 };
 
 // Get video metadata using ffprobe
@@ -300,90 +270,106 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
  * @returns {Promise<void>}
  */
 const processTranscodingQueue = async (options = {}) => {
-  const db = readVideoDB();
-  const pendingVideos = db.videos.filter(v => v.status === 'pending_transcode');
-  
-  if (pendingVideos.length === 0) {
-    console.log('No videos pending transcoding');
-    return;
-  }
-  
-  console.log(`Found ${pendingVideos.length} videos pending transcoding`);
-  console.log(`Encoding options: ${JSON.stringify(options)}`);
-  
-  // Set default encoding options
-  const encodingOptions = {
-    videoCodec: options.videoCodec || 'libx264',
-    audioCodec: options.audioCodec || 'aac',
-    preset: options.preset || 'medium',
-    forceTranscode: options.forceTranscode || false
-  };
-  
-  for (const video of pendingVideos) {
-    try {
-      console.log(`Starting transcoding for video: ${video.title} (${video.uuid})`);
-      
-      // Update status to transcoding
-      updateVideoStatus(video.uuid, 'transcoding', 0);
-      
-      const videoFolder = path.join(__dirname, '../media', video.path);
-      const originalDir = path.join(videoFolder, 'original');
-      
-      // Ensure directories exist
-      if (!fs.existsSync(videoFolder)) {
-        fs.mkdirSync(videoFolder, { recursive: true });
-        console.log(`Created video folder: ${videoFolder}`);
-      }
-      
-      if (!fs.existsSync(originalDir)) {
-        console.error(`Original directory not found: ${originalDir}`);
-        updateVideoStatus(video.uuid, 'error', 0);
-        continue;
-      }
-      
-      // Find the first video file in the original directory
-      const files = fs.readdirSync(originalDir);
-      const videoFile = files.find(file => {
-        const ext = path.extname(file).toLowerCase();
-        return ['.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.ts'].includes(ext);
-      });
-      
-      if (!videoFile) {
-        console.error(`No valid video file found in ${originalDir}`);
-        updateVideoStatus(video.uuid, 'error', 0);
-        continue;
-      }
-      
-      const videoPath = path.join(originalDir, videoFile);
-      
-      // Verify the file exists and is readable
-      try {
-        fs.accessSync(videoPath, fs.constants.R_OK);
-      } catch (err) {
-        console.error(`Cannot access video file: ${videoPath}`, err);
-        updateVideoStatus(video.uuid, 'error', 0);
-        continue;
-      }
-      
-      // Get the requested transcode quality (if any)
-      const requestedQuality = video.transcodeQuality || 'all';
-      console.log(`Requested transcode quality: ${requestedQuality}`);
-      
-      // Apply any video-specific encoding options
-      const videoEncodingOptions = {
-        ...encodingOptions,
-        // Allow per-video override of encoding options
-        ...(video.encodingOptions || {})
-      };
-      
-      // Start transcoding with the requested quality and encoding options
-      await createHLSStream(video.uuid, videoPath, videoFolder, requestedQuality, videoEncodingOptions);
-      
-      console.log(`Transcoding complete for video: ${video.title} (${video.uuid})`);
-    } catch (error) {
-      console.error(`Error processing video ${video.uuid}:`, error);
-      updateVideoStatus(video.uuid, 'error', 0);
+  try {
+    const pendingVideos = await db.getVideosByStatus('pending_transcode');
+    
+    if (pendingVideos.length === 0) {
+      console.log('No videos pending transcoding');
+      return;
     }
+    
+    console.log(`Found ${pendingVideos.length} videos pending transcoding`);
+    console.log(`Encoding options: ${JSON.stringify(options)}`);
+    
+    // Set default encoding options
+    const encodingOptions = {
+      videoCodec: options.videoCodec || 'libx264',
+      audioCodec: options.audioCodec || 'aac',
+      preset: options.preset || 'medium',
+      forceTranscode: options.forceTranscode || false
+    };
+    
+    for (const video of pendingVideos) {
+      try {
+        console.log(`Starting transcoding for video: ${video.title} (${video.uuid})`);
+        
+        // Update status to transcoding
+        await updateVideoStatus(video.uuid, 'transcoding', 0);
+        
+        const videoFolder = path.join(__dirname, '../media', video.path);
+        const originalDir = path.join(videoFolder, 'original');
+        
+        // Ensure directories exist
+        if (!fs.existsSync(videoFolder)) {
+          fs.mkdirSync(videoFolder, { recursive: true });
+          console.log(`Created video folder: ${videoFolder}`);
+        }
+        
+        if (!fs.existsSync(originalDir)) {
+          console.error(`Original directory not found: ${originalDir}`);
+          await updateVideoStatus(video.uuid, 'error', 0);
+          continue;
+        }
+        
+        // Find the first video file in the original directory
+        const files = fs.readdirSync(originalDir);
+        const videoFile = files.find(file => {
+          const ext = path.extname(file).toLowerCase();
+          return ['.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.ts'].includes(ext);
+        });
+        
+        if (!videoFile) {
+          console.error(`No valid video file found in ${originalDir}`);
+          await updateVideoStatus(video.uuid, 'error', 0);
+          continue;
+        }
+        
+        const videoPath = path.join(originalDir, videoFile);
+        
+        // Verify the file exists and is readable
+        try {
+          fs.accessSync(videoPath, fs.constants.R_OK);
+        } catch (err) {
+          console.error(`Cannot access video file: ${videoPath}`, err);
+          await updateVideoStatus(video.uuid, 'error', 0);
+          continue;
+        }
+        
+        // Get the requested transcode quality (if any)
+        const requestedQuality = video.transcode_quality || 'all';
+        console.log(`Requested transcode quality: ${requestedQuality}`);
+        
+        // Parse encoding options from the database if available
+        let videoEncodingOptions = { ...encodingOptions };
+        
+        if (video.encoding_options) {
+          try {
+            // If encoding_options is a string, parse it; otherwise use it directly
+            const parsedOptions = typeof video.encoding_options === 'string' 
+              ? JSON.parse(video.encoding_options) 
+              : video.encoding_options;
+            
+            videoEncodingOptions = {
+              ...encodingOptions,
+              ...parsedOptions
+            };
+          } catch (err) {
+            console.error(`Error parsing encoding options for video ${video.uuid}:`, err);
+            // Continue with default options
+          }
+        }
+        
+        // Start transcoding with the requested quality and encoding options
+        await createHLSStream(video.uuid, videoPath, videoFolder, requestedQuality, videoEncodingOptions);
+        
+        console.log(`Transcoding complete for video: ${video.title} (${video.uuid})`);
+      } catch (error) {
+        console.error(`Error processing video ${video.uuid}:`, error);
+        await updateVideoStatus(video.uuid, 'error', 0);
+      }
+    }
+  } catch (err) {
+    console.error('Error processing transcoding queue:', err);
   }
 };
 

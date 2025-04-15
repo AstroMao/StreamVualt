@@ -50,6 +50,8 @@ stream-vault/
 
 ## Installation
 
+### Standard Installation
+
 1. Clone the repository:
    ```
    git clone https://github.com/yourusername/stream-vault.git
@@ -66,7 +68,7 @@ stream-vault/
    mkdir -p media upload
    ```
 
-4. Update the Nginx configuration:
+4. Update the Nginx configuration (optional):
    - Edit `nginx.conf` to update the paths to your actual directories
    - Copy the configuration to your Nginx sites directory
 
@@ -74,6 +76,117 @@ stream-vault/
    ```
    npm start
    ```
+
+### Container Installation (Docker or Podman)
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/stream-vault.git
+   cd stream-vault
+   ```
+
+#### Using Docker
+
+2. Build and start the containers using npm scripts:
+   ```
+   npm run docker:build
+   npm run docker:up
+   ```
+   
+   Or directly with Docker Compose:
+   ```
+   docker-compose up -d
+   ```
+
+3. The application will be available at http://localhost:3000
+
+4. To stop the containers:
+   ```
+   npm run docker:down
+   ```
+   
+   Or directly with Docker Compose:
+   ```
+   docker-compose down
+   ```
+
+5. To view logs:
+   ```
+   npm run docker:logs
+   ```
+   
+   Or directly with Docker Compose:
+   ```
+   docker-compose logs -f
+   ```
+
+#### Using Podman
+
+2. Install podman-compose if you don't have it already:
+   ```
+   npm run podman:install
+   ```
+   
+   Or install it manually:
+   ```
+   pip3 install podman-compose
+   ```
+
+3. Build and start the containers using npm scripts:
+   ```
+   npm run podman:build
+   npm run podman:up
+   ```
+   
+   Or directly with Podman Compose:
+   ```
+   podman-compose up -d
+   ```
+
+3. The application will be available at http://localhost:3000
+
+4. To stop the containers:
+   ```
+   npm run podman:down
+   ```
+   
+   Or directly with Podman Compose:
+   ```
+   podman-compose down
+   ```
+
+5. To view logs:
+   ```
+   npm run podman:logs
+   ```
+   
+   Or directly with Podman Compose:
+   ```
+   podman-compose logs -f
+   ```
+
+> **Note**: Podman is a daemonless container engine that's compatible with Docker images and Docker Compose files. It's a good alternative if you prefer a rootless container solution.
+
+### Migrating from JSON to PostgreSQL
+
+If you're upgrading from a previous version that used JSON file storage, you can migrate your data to PostgreSQL:
+
+1. Install PostgreSQL and make sure it's running
+2. Update your environment variables or db.js configuration to connect to your PostgreSQL instance
+3. Run the migration script:
+   ```
+   npm run migrate
+   ```
+   
+   Or directly:
+   ```
+   node scripts/migrate-to-postgres.js
+   ```
+   
+4. The script will:
+   - Transfer all videos and users to the PostgreSQL database
+   - Create a backup of your original JSON database file
+   - Log the migration process
 
 ## Usage
 
@@ -137,17 +250,22 @@ The VideoJS player can be customized by editing `public/player/index.html`. Refe
 Potential improvements for future versions:
 
 ### Transcoding Feature Implementation
-- Automated video transcoding for non-HLS uploads
-- Multiple quality variants (1080p, 720p, 480p)
-- Thumbnail generation from video frames
-- Progress tracking for transcoding jobs
+- Automated video transcoding for non-HLS uploads ✅
+- Multiple quality variants (1080p, 720p, 480p) ✅
+- Thumbnail generation from video frames ✅
+- Progress tracking for transcoding jobs ✅
 
 ### Database Enhancement
-- Migration to a proper database system (PostgreSQL, MongoDB)
-- Improved metadata storage and retrieval
+- Migration to a proper database system (PostgreSQL) ✅
+- Improved metadata storage and retrieval ✅
 - Search and filtering capabilities
 - Video categorization and tagging
 - User management and permissions
+
+### Containerization
+- Docker setup for easy deployment ✅
+- Docker Compose for orchestration ✅
+- Production-ready configuration
 
 ### Additional Features
 - Adaptive bitrate streaming improvements

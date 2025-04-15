@@ -10,6 +10,7 @@ const multer = require('multer');
 const unzipper = require('unzipper');
 const { conditionalAuth } = require('./auth');
 const { processTranscodingQueue } = require('./transcode');
+const db = require('./db');
 
 // Promisify the pipeline function
 const pipelineAsync = promisify(pipeline);
@@ -35,93 +36,74 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 * 1024 } // 50GB limit
 });
 
-// Helper function to read the video database
-const readVideoDB = () => {
-  try {
-    const data = fs.readFileSync(path.join(__dirname, 'video-db.json'), 'utf8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('Error reading video database:', err);
-    return { videos: [] };
-  }
-};
-
-// Helper function to write to the video database
-const writeVideoDB = (data) => {
-  try {
-    fs.writeFileSync(
-      path.join(__dirname, 'video-db.json'),
-      JSON.stringify(data, null, 2),
-      'utf8'
-    );
-    return true;
-  } catch (err) {
-    console.error('Error writing to video database:', err);
-    return false;
-  }
-};
 
 // API Routes
 
 // Get all videos (public)
-app.get('/api/videos', (req, res) => {
-  const db = readVideoDB();
-  // Return only necessary information, not the file paths
-  const videos = db.videos.map(video => ({
-    uuid: video.uuid,
-    title: video.title,
-    description: video.description,
-    dateAdded: video.dateAdded
-  }));
-  res.json(videos);
+app.get('/api/videos', async (req, res) => {
+  try {
+    const videos = await db.getAllVideos();
+    res.json(videos);
+  } catch (err) {
+    console.error('Error fetching videos:', err);
+    res.status(500).json({ error: 'Failed to fetch videos' });
+  }
 });
 
 // Get video by UUID (public)
-app.get('/api/video/:uuid', (req, res) => {
-  const { uuid } = req.params;
-  const db = readVideoDB();
-  const video = db.videos.find(v => v.uuid === uuid);
-  
-  if (!video) {
-    return res.status(404).json({ error: 'Video not found' });
-  }
-  
-  // Check for available quality variants
-  const videoPath = path.join(__dirname, '../media', video.path);
-  const qualities = [];
-  
-  // Check for common quality folders
-  ['1080p', '720p', '480p', '360p'].forEach(quality => {
-    const qualityPath = path.join(videoPath, quality);
-    if (fs.existsSync(qualityPath) && fs.existsSync(path.join(qualityPath, 'playlist.m3u8'))) {
-      qualities.push(quality);
+app.get('/api/video/:uuid', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const video = await db.getVideoByUuid(uuid);
+    
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
     }
-  });
-  
-  // Return video details without exposing the actual path
-  res.json({
-    uuid: video.uuid,
-    title: video.title,
-    description: video.description,
-    dateAdded: video.dateAdded,
-    qualities: qualities
-  });
+    
+    // Check for available quality variants
+    const videoPath = path.join(__dirname, '../media', video.path);
+    const qualities = [];
+    
+    // Check for common quality folders
+    ['1080p', '720p', '480p', '360p'].forEach(quality => {
+      const qualityPath = path.join(videoPath, quality);
+      if (fs.existsSync(qualityPath) && fs.existsSync(path.join(qualityPath, 'playlist.m3u8'))) {
+        qualities.push(quality);
+      }
+    });
+    
+    // Return video details without exposing the actual path
+    res.json({
+      uuid: video.uuid,
+      title: video.title,
+      description: video.description,
+      dateAdded: video.date_added,
+      qualities: qualities
+    });
+  } catch (err) {
+    console.error(`Error fetching video with UUID ${req.params.uuid}:`, err);
+    res.status(500).json({ error: 'Failed to fetch video details' });
+  }
 });
 
 // Get video stream path by UUID (used by player)
-app.get('/api/stream/:uuid', (req, res) => {
-  const { uuid } = req.params;
-  const db = readVideoDB();
-  const video = db.videos.find(v => v.uuid === uuid);
-  
-  if (!video) {
-    return res.status(404).json({ error: 'Video not found' });
+app.get('/api/stream/:uuid', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const video = await db.getVideoByUuid(uuid);
+    
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    // Return the path to the HLS manifest
+    res.json({
+      streamUrl: `/media/${video.path}/master.m3u8`
+    });
+  } catch (err) {
+    console.error(`Error fetching stream for UUID ${req.params.uuid}:`, err);
+    res.status(500).json({ error: 'Failed to fetch stream information' });
   }
-  
-  // Return the path to the HLS manifest
-  res.json({
-    streamUrl: `/media/${video.path}/master.m3u8`
-  });
 });
 
 // Add a new video (admin only)
@@ -211,24 +193,20 @@ app.post('/api/admin/videos', upload.single('video'), async (req, res) => {
     }
     
     // Add entry to database
-    const db = readVideoDB();
-    db.videos.push({
+    const videoData = {
       uuid: newUuid,
       path: videoFolder,
       title: title || 'Untitled Video',
       description: description || '',
-      dateAdded: new Date().toISOString(),
       status: fileExt === '.zip' ? 'ready' : 'pending_transcode'
-    });
+    };
     
-    if (writeVideoDB(db)) {
-      res.status(201).json({ 
-        message: 'Video added successfully',
-        uuid: newUuid
-      });
-    } else {
-      res.status(500).json({ error: 'Failed to add video to database' });
-    }
+    await db.addVideo(videoData);
+    
+    res.status(201).json({ 
+      message: 'Video added successfully',
+      uuid: newUuid
+    });
   } catch (error) {
     console.error('Error handling video upload:', error);
     res.status(500).json({ error: 'Failed to process video upload' });
@@ -236,81 +214,88 @@ app.post('/api/admin/videos', upload.single('video'), async (req, res) => {
 });
 
 // Update video metadata (admin only)
-app.put('/api/admin/videos/:uuid', (req, res) => {
-  const { uuid } = req.params;
-  const { title, description } = req.body;
-  
-  const db = readVideoDB();
-  const videoIndex = db.videos.findIndex(v => v.uuid === uuid);
-  
-  if (videoIndex === -1) {
-    return res.status(404).json({ error: 'Video not found' });
-  }
-  
-  // Update video metadata
-  if (title) db.videos[videoIndex].title = title;
-  if (description) db.videos[videoIndex].description = description;
-  
-  if (writeVideoDB(db)) {
+app.put('/api/admin/videos/:uuid', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const { title, description } = req.body;
+    
+    const video = await db.getVideoByUuid(uuid);
+    
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    // Update video metadata
+    const metadata = {};
+    if (title) metadata.title = title;
+    if (description) metadata.description = description;
+    
+    const updatedVideo = await db.updateVideoMetadata(uuid, metadata);
+    
     res.json({ 
       message: 'Video updated successfully',
       video: {
-        uuid: db.videos[videoIndex].uuid,
-        title: db.videos[videoIndex].title,
-        description: db.videos[videoIndex].description,
-        dateAdded: db.videos[videoIndex].dateAdded
+        uuid: updatedVideo.uuid,
+        title: updatedVideo.title,
+        description: updatedVideo.description,
+        dateAdded: updatedVideo.date_added
       }
     });
-  } else {
+  } catch (err) {
+    console.error(`Error updating video metadata for UUID ${req.params.uuid}:`, err);
     res.status(500).json({ error: 'Failed to update video' });
   }
 });
 
 // Delete a video (admin only)
-app.delete('/api/admin/videos/:uuid', (req, res) => {
-  const { uuid } = req.params;
-  
-  const db = readVideoDB();
-  const videoIndex = db.videos.findIndex(v => v.uuid === uuid);
-  
-  if (videoIndex === -1) {
-    return res.status(404).json({ error: 'Video not found' });
-  }
-  
-  const videoPath = path.join(__dirname, '../media', db.videos[videoIndex].path);
-  
-  // Remove video files
+app.delete('/api/admin/videos/:uuid', async (req, res) => {
   try {
-    fs.rmSync(videoPath, { recursive: true, force: true });
-  } catch (err) {
-    console.error('Error deleting video files:', err);
-    // Continue anyway to remove from database
-  }
-  
-  // Remove from database
-  db.videos.splice(videoIndex, 1);
-  
-  if (writeVideoDB(db)) {
+    const { uuid } = req.params;
+    
+    const video = await db.getVideoByUuid(uuid);
+    
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    const videoPath = path.join(__dirname, '../media', video.path);
+    
+    // Remove video files
+    try {
+      fs.rmSync(videoPath, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error deleting video files:', err);
+      // Continue anyway to remove from database
+    }
+    
+    // Remove from database
+    await db.deleteVideo(uuid);
+    
     res.json({ message: 'Video deleted successfully' });
-  } else {
-    res.status(500).json({ error: 'Failed to update database after deletion' });
+  } catch (err) {
+    console.error(`Error deleting video with UUID ${req.params.uuid}:`, err);
+    res.status(500).json({ error: 'Failed to delete video' });
   }
 });
 
 // Serve the player page for a specific UUID
-app.get('/player/:uuid', (req, res) => {
-  const { uuid } = req.params;
-  
-  // Check if the video exists
-  const db = readVideoDB();
-  const video = db.videos.find(v => v.uuid === uuid);
-  
-  if (!video) {
-    return res.status(404).send('Video not found');
+app.get('/player/:uuid', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    
+    // Check if the video exists
+    const video = await db.getVideoByUuid(uuid);
+    
+    if (!video) {
+      return res.status(404).send('Video not found');
+    }
+    
+    // Serve the player page
+    res.sendFile(path.join(__dirname, '../public/player/index.html'));
+  } catch (err) {
+    console.error(`Error serving player page for UUID ${req.params.uuid}:`, err);
+    res.status(500).send('Server error');
   }
-  
-  // Serve the player page
-  res.sendFile(path.join(__dirname, '../public/player/index.html'));
 });
 
 // Serve the library page (protected)
@@ -336,73 +321,71 @@ app.get('/admin', (req, res) => {
 });
 
 // Get video transcoding status
-app.get('/api/video/:uuid/status', (req, res) => {
-  const { uuid } = req.params;
-  const db = readVideoDB();
-  const video = db.videos.find(v => v.uuid === uuid);
-  
-  if (!video) {
-    return res.status(404).json({ error: 'Video not found' });
-  }
-  
-  res.json({
-    status: video.status || 'unknown',
-    progress: video.transcodeProgress || 0
-  });
-});
-
-// Start transcoding process (admin only)
-app.post('/api/admin/transcode', (req, res) => {
-  const { videoId, quality, encodingOptions } = req.body || {};
-  
-  // Parse encoding options
-  const transcodingOptions = {};
-  
-  // Add encoding options if provided
-  if (encodingOptions) {
-    // Video codec (e.g., libx264, libx265)
-    if (encodingOptions.videoCodec) {
-      transcodingOptions.videoCodec = encodingOptions.videoCodec;
-    }
-    
-    // Audio codec (e.g., aac, libopus)
-    if (encodingOptions.audioCodec) {
-      transcodingOptions.audioCodec = encodingOptions.audioCodec;
-    }
-    
-    // Encoding preset (e.g., ultrafast, fast, medium, slow)
-    if (encodingOptions.preset) {
-      transcodingOptions.preset = encodingOptions.preset;
-    }
-    
-    // Force transcoding even for highest quality
-    if (encodingOptions.forceTranscode === true) {
-      transcodingOptions.forceTranscode = true;
-    }
-  }
-  
-  console.log('Transcoding options:', transcodingOptions);
-  
-  // Start the transcoding process in the background
-  if (videoId) {
-    // If a specific videoId is provided, only transcode that video
-    const db = readVideoDB();
-    const video = db.videos.find(v => v.uuid === videoId);
+app.get('/api/video/:uuid/status', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const video = await db.getVideoByUuid(uuid);
     
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
     }
     
-    // Update video status to pending_transcode
-    video.status = 'pending_transcode';
-    video.transcodeQuality = quality || 'all'; // Store the requested quality
+    res.json({
+      status: video.status || 'unknown',
+      progress: video.transcode_progress || 0
+    });
+  } catch (err) {
+    console.error(`Error getting status for video with UUID ${req.params.uuid}:`, err);
+    res.status(500).json({ error: 'Failed to get video status' });
+  }
+});
+
+// Start transcoding process (admin only)
+app.post('/api/admin/transcode', async (req, res) => {
+  try {
+    const { videoId, quality, encodingOptions } = req.body || {};
     
-    // Store encoding options for this specific video if provided
-    if (Object.keys(transcodingOptions).length > 0) {
-      video.encodingOptions = transcodingOptions;
+    // Parse encoding options
+    const transcodingOptions = {};
+    
+    // Add encoding options if provided
+    if (encodingOptions) {
+      // Video codec (e.g., libx264, libx265)
+      if (encodingOptions.videoCodec) {
+        transcodingOptions.videoCodec = encodingOptions.videoCodec;
+      }
+      
+      // Audio codec (e.g., aac, libopus)
+      if (encodingOptions.audioCodec) {
+        transcodingOptions.audioCodec = encodingOptions.audioCodec;
+      }
+      
+      // Encoding preset (e.g., ultrafast, fast, medium, slow)
+      if (encodingOptions.preset) {
+        transcodingOptions.preset = encodingOptions.preset;
+      }
+      
+      // Force transcoding even for highest quality
+      if (encodingOptions.forceTranscode === true) {
+        transcodingOptions.forceTranscode = true;
+      }
     }
     
-    if (writeVideoDB(db)) {
+    console.log('Transcoding options:', transcodingOptions);
+    
+    // Start the transcoding process in the background
+    if (videoId) {
+      // If a specific videoId is provided, only transcode that video
+      const video = await db.getVideoByUuid(videoId);
+      
+      if (!video) {
+        return res.status(404).json({ error: 'Video not found' });
+      }
+      
+      // Update video status to pending_transcode and store the requested quality
+      await db.updateVideoStatus(videoId, 'pending_transcode', 0);
+      await db.updateVideoTranscodeQuality(videoId, quality || 'all', transcodingOptions);
+      
       // Start the transcoding process for this video
       processTranscodingQueue(transcodingOptions).catch(err => {
         console.error('Error in transcoding queue:', err);
@@ -413,39 +396,48 @@ app.post('/api/admin/transcode', (req, res) => {
         options: transcodingOptions
       });
     } else {
-      return res.status(500).json({ error: 'Failed to update video status' });
+      // Start the transcoding process for all pending videos
+      processTranscodingQueue(transcodingOptions).catch(err => {
+        console.error('Error in transcoding queue:', err);
+      });
+      
+      res.json({ 
+        message: 'Transcoding process started for all pending videos',
+        options: transcodingOptions
+      });
     }
-  } else {
-    // Start the transcoding process for all pending videos
-    processTranscodingQueue(transcodingOptions).catch(err => {
-      console.error('Error in transcoding queue:', err);
-    });
-    
-    res.json({ 
-      message: 'Transcoding process started for all pending videos',
-      options: transcodingOptions
-    });
+  } catch (err) {
+    console.error('Error starting transcoding process:', err);
+    res.status(500).json({ error: 'Failed to start transcoding process' });
   }
 });
 
 // Start the server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   
-  // Check for videos that need transcoding on startup
-  setTimeout(() => {
-    console.log('Checking for videos that need transcoding...');
+  // Initialize the database
+  try {
+    await db.initDB();
+    console.log('Database initialized successfully');
     
-    // Default encoding options for startup transcoding
-    const defaultOptions = {
-      videoCodec: 'libx264',
-      audioCodec: 'aac',
-      preset: 'medium',
-      forceTranscode: false
-    };
-    
-    processTranscodingQueue(defaultOptions).catch(err => {
-      console.error('Error in transcoding queue:', err);
-    });
-  }, 5000); // Wait 5 seconds after server start
+    // Check for videos that need transcoding on startup
+    setTimeout(() => {
+      console.log('Checking for videos that need transcoding...');
+      
+      // Default encoding options for startup transcoding
+      const defaultOptions = {
+        videoCodec: 'libx264',
+        audioCodec: 'aac',
+        preset: 'medium',
+        forceTranscode: false
+      };
+      
+      processTranscodingQueue(defaultOptions).catch(err => {
+        console.error('Error in transcoding queue:', err);
+      });
+    }, 5000); // Wait 5 seconds after server start
+  } catch (err) {
+    console.error('Error initializing database:', err);
+  }
 });

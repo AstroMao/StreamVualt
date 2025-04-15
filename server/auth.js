@@ -1,10 +1,23 @@
 const basicAuth = require('express-basic-auth');
 const fs = require('fs');
 const path = require('path');
+const db = require('./db');
+
+// Custom authentication function that checks against the database
+const customAuthenticator = async (username, password, callback) => {
+  try {
+    const user = await db.verifyUserCredentials(username, password);
+    callback(null, !!user);
+  } catch (err) {
+    console.error('Authentication error:', err);
+    callback(err);
+  }
+};
 
 // Simple authentication middleware
 const auth = basicAuth({
-  users: { 'admin': 'password' }, // Change this to your preferred username/password
+  authorizer: customAuthenticator,
+  authorizeAsync: true,
   challenge: true,
   realm: 'Stream Vault Admin Area'
 });
