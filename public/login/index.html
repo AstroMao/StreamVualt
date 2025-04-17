@@ -213,7 +213,7 @@
                     if (response.ok && data && data.success) {
                         // If successful, redirect to the library
                         console.log('Login successful, redirecting...');
-                        window.location.href = '/library';
+                        window.location.href = '/admin/library';
                     } else {
                         // If failed, show error message
                         errorMessage.textContent = (data && data.error) || 'Invalid username or password';
