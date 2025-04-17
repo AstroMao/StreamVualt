@@ -7,14 +7,28 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'video_db',
   password: process.env.DB_PASSWORD || 'db_password',
   port: parseInt(process.env.DB_PORT || '5432'),
+  // Connection retry options
+  max: 20, // Maximum number of clients in the pool
+  idleTimeoutMillis: 30000, // How long a client is allowed to remain idle before being closed
+  connectionTimeoutMillis: 10000, // How long to wait for a connection to become available
 });
 
-// Generic query function
-async function query(text, params) {
+// Handle pool errors
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+});
+
+// Generic query function with retry mechanism
+async function query(text, params, retries = 5, delay = 2000) {
   try {
     const result = await pool.query(text, params);
     return result;
   } catch (err) {
+    if (err.code === 'ECONNREFUSED' && retries > 0) {
+      console.log(`Database connection refused. Retrying in ${delay}ms... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return query(text, params, retries - 1, delay);
+    }
     console.error('Database query error:', err);
     throw err;
   }

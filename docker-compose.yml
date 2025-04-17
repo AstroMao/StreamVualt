@@ -8,7 +8,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -26,6 +27,8 @@ services:
     volumes:
       - ./media:/app/media
       - ./upload:/app/upload
+    networks:
+      - stream-vault-network
 
   db:
     image: postgres:14-alpine
@@ -42,6 +45,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     command: postgres -c 'max_connections=100'
+    networks:
+      - stream-vault-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-video_user} -d ${DB_NAME:-video_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres_data:
+
+networks:
+  stream-vault-network:
+    driver: bridge

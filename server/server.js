@@ -583,8 +583,12 @@ app.post('/api/settings/change-password', async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   
-  // Initialize the database
+  // Initialize the database with a delay to ensure the database is ready
   try {
+    console.log('Waiting for database to be ready...');
+    // Wait for 5 seconds before initializing the database
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
     await db.initDB();
     console.log('Database initialized successfully');
     
