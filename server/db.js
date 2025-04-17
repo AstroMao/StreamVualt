@@ -47,16 +47,28 @@ async function initDB() {
         role VARCHAR(20) NOT NULL
       );
     `);
+    
+    // Create settings table
+    await query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        name VARCHAR(50) PRIMARY KEY,
+        value JSONB NOT NULL
+      );
+    `);
 
     // Check if default users exist, if not create them
     const usersExist = await query('SELECT COUNT(*) FROM users');
     if (parseInt(usersExist.rows[0].count) === 0) {
+      // Get admin credentials from environment variables or use defaults
+      const adminUsername = process.env.ADMIN_USERNAME || 'admin';
+      const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+      
       // Insert default users
       await query(`
         INSERT INTO users (username, password, role) VALUES
-        ('admin', 'admin123', 'admin'),
+        ($1, $2, 'admin'),
         ('user', 'user123', 'user')
-      `);
+      `, [adminUsername, adminPassword]);
       console.log('Default users created');
     }
 
@@ -208,14 +220,67 @@ async function verifyUserCredentials(username, password) {
     const user = await getUserByUsername(username);
     if (!user) return null;
     
-    // In a real application, you would use bcrypt to compare hashed passwords
-    // For now, we're doing a simple comparison
-    if (user.password === password) {
-      return user;
+    // Check if password is hashed (starts with $2b$ for bcrypt)
+    if (user.password.startsWith('$2b$')) {
+      // Use bcrypt to compare
+      const bcrypt = require('bcrypt');
+      const match = await bcrypt.compare(password, user.password);
+      return match ? user : null;
+    } else {
+      // Legacy plain text comparison (for backward compatibility)
+      if (user.password === password) {
+        return user;
+      }
+      return null;
     }
-    return null;
   } catch (err) {
     console.error('Error verifying user credentials:', err);
+    throw err;
+  }
+}
+
+// Update user password
+async function updateUserPassword(username, hashedPassword) {
+  try {
+    const result = await query(
+      'UPDATE users SET password = $1 WHERE username = $2 RETURNING *',
+      [hashedPassword, username]
+    );
+    return result.rows[0];
+  } catch (err) {
+    console.error(`Error updating password for user ${username}:`, err);
+    throw err;
+  }
+}
+
+// Hash admin password
+async function hashAdminPassword() {
+  try {
+    const bcrypt = require('bcrypt');
+    const saltRounds = 10;
+    
+    // Get admin user
+    const admin = await getUserByUsername('admin');
+    if (!admin) {
+      console.log('Admin user not found');
+      return;
+    }
+    
+    // Skip if password is already hashed
+    if (admin.password.startsWith('$2b$')) {
+      console.log('Admin password is already hashed');
+      return;
+    }
+    
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(admin.password, saltRounds);
+    
+    // Update the password
+    await updateUserPassword('admin', hashedPassword);
+    
+    console.log('Admin password hashed successfully');
+  } catch (err) {
+    console.error('Error hashing admin password:', err);
     throw err;
   }
 }
@@ -233,5 +298,7 @@ module.exports = {
   deleteVideo,
   getVideosByStatus,
   getUserByUsername,
-  verifyUserCredentials
+  verifyUserCredentials,
+  updateUserPassword,
+  hashAdminPassword
 };

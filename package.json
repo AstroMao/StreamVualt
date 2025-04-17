@@ -15,12 +15,15 @@
     "podman:up": "podman-compose up -d",
     "podman:down": "podman-compose down",
     "podman:logs": "podman-compose logs -f",
-    "migrate": "node scripts/migrate-to-postgres.js"
+    "migrate": "node scripts/migrate-to-postgres.js",
+    "reset-db": "node scripts/reset-database.js"
   },
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "express-basic-auth": "^1.2.1",
+    "express-session": "^1.17.3",
     "fluent-ffmpeg": "^2.1.3",
     "multer": "^1.4.5-lts.1",
     "pg": "^8.11.3",

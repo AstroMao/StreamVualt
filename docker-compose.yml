@@ -18,6 +18,11 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-db_password}
       - DB_NAME=${DB_NAME:-video_db}
       - DB_PORT=${DB_PORT:-5432}
+      - SESSION_SECRET=${SESSION_SECRET:-stream-vault-secret}
+      - SESSION_MAX_AGE=${SESSION_MAX_AGE:-86400000}
+      - DEFAULT_QUALITY=${DEFAULT_QUALITY:-all}
+      - USE_GPU=${USE_GPU:-false}
+      - AUTO_TRANSCODE=${AUTO_TRANSCODE:-true}
     volumes:
       - ./media:/app/media
       - ./upload:/app/upload

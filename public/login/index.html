@@ -139,7 +139,7 @@
     <header>
         <div class="container">
             <h1>Stream Vault</h1>
-            <a href="/" class="nav-link">Home</a>
+            <!-- No navigation links needed on login page -->
         </div>
     </header>
     
@@ -178,31 +178,50 @@
                 const username = document.getElementById('username').value;
                 const password = document.getElementById('password').value;
                 
-                // For this simple implementation, we'll use basic auth directly
-                // In a real app, you'd want to use a more secure approach
-                
                 try {
-                    // Create the Authorization header
-                    const authHeader = 'Basic ' + btoa(username + ':' + password);
+                    // Clear any previous error messages
+                    errorMessage.style.display = 'none';
                     
-                    // Try to access a protected resource
-                    const response = await fetch('/library', {
+                    // Validate input
+                    if (!username || !password) {
+                        errorMessage.textContent = 'Username and password are required';
+                        errorMessage.style.display = 'block';
+                        return;
+                    }
+                    
+                    // Send login request to API
+                    console.log('Sending login request...');
+                    const response = await fetch('/api/login', {
+                        method: 'POST',
                         headers: {
-                            'Authorization': authHeader
-                        }
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ username, password })
                     });
                     
-                    if (response.ok) {
+                    console.log('Login response status:', response.status);
+                    
+                    // Try to parse the response as JSON
+                    let data;
+                    try {
+                        data = await response.json();
+                        console.log('Login response data:', data);
+                    } catch (e) {
+                        console.error('Error parsing JSON response:', e);
+                    }
+                    
+                    if (response.ok && data && data.success) {
                         // If successful, redirect to the library
+                        console.log('Login successful, redirecting...');
                         window.location.href = '/library';
                     } else {
                         // If failed, show error message
-                        errorMessage.textContent = 'Invalid username or password';
+                        errorMessage.textContent = (data && data.error) || 'Invalid username or password';
                         errorMessage.style.display = 'block';
                     }
                 } catch (error) {
                     console.error('Login error:', error);
-                    errorMessage.textContent = 'An error occurred during login';
+                    errorMessage.textContent = 'An error occurred during login. Please try again.';
                     errorMessage.style.display = 'block';
                 }
             });

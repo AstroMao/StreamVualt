@@ -106,10 +106,16 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
         crf: 23
       });
       
-      // Filter qualities based on the requested quality
+      // Filter qualities based on the requested quality and selected resolutions
       let qualities = [];
       if (requestedQuality === 'all') {
-        qualities = allQualities;
+        // If specific resolutions are selected in settings, filter by them
+        if (encodingOptions.selectedResolutions && Array.isArray(encodingOptions.selectedResolutions)) {
+          qualities = allQualities.filter(q => encodingOptions.selectedResolutions.includes(q.name));
+          console.log(`Using selected resolutions: ${encodingOptions.selectedResolutions.join(', ')}`);
+        } else {
+          qualities = allQualities;
+        }
       } else {
         // Find the specific quality requested
         const requestedQualityObj = allQualities.find(q => q.name === requestedQuality);
@@ -118,8 +124,20 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
         } else {
           // If requested quality not found, use all available qualities
           console.warn(`Requested quality "${requestedQuality}" not found, using all available qualities`);
-          qualities = allQualities;
+          
+          // Filter by selected resolutions if available
+          if (encodingOptions.selectedResolutions && Array.isArray(encodingOptions.selectedResolutions)) {
+            qualities = allQualities.filter(q => encodingOptions.selectedResolutions.includes(q.name));
+          } else {
+            qualities = allQualities;
+          }
         }
+      }
+      
+      // Ensure we have at least one quality
+      if (qualities.length === 0) {
+        console.warn('No qualities selected, using all available qualities');
+        qualities = allQualities;
       }
       
       console.log(`Transcoding with qualities: ${qualities.map(q => q.name).join(', ')}`);
@@ -181,6 +199,16 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
             `-c:v ${videoCodecToUse}`,  // Video codec
             `-vf scale=${width}:${height}`, // Scale to target resolution
           ];
+          
+          // Add GPU-specific options if using NVENC
+          if (videoCodecToUse.includes('nvenc')) {
+            outputOptions.push(
+              '-rc:v vbr_hq',      // High quality variable bitrate mode
+              '-rc-lookahead:v 32', // Lookahead frames for better quality
+              '-spatial_aq:v 1',    // Spatial adaptive quantization
+              '-temporal_aq:v 1'    // Temporal adaptive quantization
+            );
+          }
           
           // Add quality settings based on codec
           if (videoCodecToUse === 'libx264' || videoCodecToUse === 'libx265') {
@@ -263,10 +291,12 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
 /**
  * Process videos that need transcoding
  * @param {Object} options - Options for the transcoding process
- * @param {string} options.videoCodec - Video codec to use (e.g., 'libx264', 'libx265')
+ * @param {string} options.videoCodec - Video codec to use (e.g., 'libx264', 'libx265', 'h264_nvenc', 'hevc_nvenc')
  * @param {string} options.audioCodec - Audio codec to use (e.g., 'aac', 'libopus')
  * @param {string} options.preset - Encoding preset (e.g., 'ultrafast', 'fast', 'medium', 'slow')
  * @param {boolean} options.forceTranscode - Force transcoding even for highest quality
+ * @param {boolean} options.useGPU - Use GPU acceleration if available
+ * @param {boolean} options.autoTranscode - Automatically transcode videos after upload
  * @returns {Promise<void>}
  */
 const processTranscodingQueue = async (options = {}) => {
@@ -286,8 +316,32 @@ const processTranscodingQueue = async (options = {}) => {
       videoCodec: options.videoCodec || 'libx264',
       audioCodec: options.audioCodec || 'aac',
       preset: options.preset || 'medium',
-      forceTranscode: options.forceTranscode || false
+      forceTranscode: options.forceTranscode || false,
+      useGPU: options.useGPU || false,
+      autoTranscode: options.autoTranscode !== undefined ? options.autoTranscode : true
     };
+
+    // Check if GPU acceleration is requested and available
+    if (encodingOptions.useGPU) {
+      try {
+        // Check for NVIDIA GPU
+        const { exec } = require('child_process');
+        exec('nvidia-smi', (error, stdout, stderr) => {
+          if (!error) {
+            console.log('NVIDIA GPU detected, using hardware acceleration');
+            // Use NVIDIA hardware acceleration
+            encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'hevc_nvenc' : 'h264_nvenc';
+          } else {
+            console.log('NVIDIA GPU not detected or drivers not installed, falling back to CPU encoding');
+            // Fall back to CPU encoding
+            encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'libx265' : 'libx264';
+          }
+        });
+      } catch (err) {
+        console.log('Error checking for GPU, falling back to CPU encoding:', err);
+        encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'libx265' : 'libx264';
+      }
+    }
     
     for (const video of pendingVideos) {
       try {
@@ -359,8 +413,14 @@ const processTranscodingQueue = async (options = {}) => {
           }
         }
         
-        // Start transcoding with the requested quality and encoding options
-        await createHLSStream(video.uuid, videoPath, videoFolder, requestedQuality, videoEncodingOptions);
+        // Check if auto-transcoding is enabled
+        if (videoEncodingOptions.autoTranscode) {
+          // Start transcoding with the requested quality and encoding options
+          await createHLSStream(video.uuid, videoPath, videoFolder, requestedQuality, videoEncodingOptions);
+        } else {
+          console.log(`Auto-transcoding disabled for video: ${video.title} (${video.uuid})`);
+          await updateVideoStatus(video.uuid, 'ready', 100);
+        }
         
         console.log(`Transcoding complete for video: ${video.title} (${video.uuid})`);
       } catch (error) {

@@ -198,15 +198,25 @@ If you're upgrading from a previous version that used JSON file storage, you can
 
 ### Authentication
 
-Default login credentials are stored in the PostgreSQL database. During database initialization, two default users are created:
+The system uses secure session-based authentication with bcrypt password hashing. During database initialization, two default users are created:
 - Username: `admin`, Password: `admin123`, Role: `admin`
 - Username: `user`, Password: `user123`, Role: `user`
 
-To change these credentials or manage users:
+The first time you log in with these credentials, the passwords will be automatically hashed for security.
+
+To change your password:
+1. Log in to the system
+2. Go to Settings > Account
+3. Use the Change Password form
+
+For advanced user management:
 1. Connect to your PostgreSQL database
 2. Use the `users` table to modify existing users or add new ones
-3. The password is stored in plain text currently (for development purposes)
-4. For production, consider implementing proper password hashing (e.g., using bcrypt)
+3. Passwords are securely hashed using bcrypt
+4. You can use the `scripts/hash-admin-password.js` script to pre-hash passwords before deployment:
+   ```
+   node scripts/hash-admin-password.js
+   ```
 
 ### Adding Videos
 
@@ -235,15 +245,21 @@ http://your-server/player/550e8400-e29b-41d4-a716-446655440000
 
 ### Changing Authentication
 
-Edit `server/auth.js` to update the username and password:
+To add or modify users:
 
-```javascript
-const auth = basicAuth({
-  users: { 'your-username': 'your-password' },
-  challenge: true,
-  realm: 'Stream Vault Admin Area'
-});
+1. Connect to your PostgreSQL database
+2. Insert or update records in the `users` table:
+
+```sql
+-- Add a new user
+INSERT INTO users (username, password, role) 
+VALUES ('new_username', 'initial_password', 'admin');
+
+-- Then use the password hashing script to secure the password:
+node scripts/hash-admin-password.js
 ```
+
+Alternatively, you can use the Settings page to change your password after logging in.
 
 ### Modifying the Player
 

@@ -4,11 +4,12 @@ const path = require('path');
 const cors = require('cors');
 const { pipeline } = require('stream');
 const { promisify } = require('util');
+const session = require('express-session');
 // Import required modules
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const unzipper = require('unzipper');
-const { conditionalAuth } = require('./auth');
+const { authMiddleware, login, logout } = require('./auth');
 const { processTranscodingQueue } = require('./transcode');
 const db = require('./db');
 
@@ -19,11 +20,30 @@ const pipelineAsync = promisify(pipeline);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'stream-vault-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production', 
+    maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
+    httpOnly: true
+  },
+  name: 'stream_vault_session' // Custom name for the session cookie
+}));
+
+// Debug middleware for session
+app.use((req, res, next) => {
+  console.log('Session:', req.session);
+  next();
+});
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
-app.use(conditionalAuth); // Apply conditional authentication
+app.use(authMiddleware); // Apply authentication middleware
 
 // Set up static file serving
 app.use(express.static(path.join(__dirname, '../public')));
@@ -309,14 +329,22 @@ app.get('/library', (req, res) => {
 
 // Serve the login page
 app.get('/login', (req, res) => {
+  // If already authenticated, redirect to library
+  if (req.session && req.session.authenticated) {
+    return res.redirect('/library');
+  }
   res.sendFile(path.join(__dirname, '../public/login/index.html'));
 });
 
+// Handle login
+app.post('/api/login', login);
+
 // Handle logout
-app.get('/logout', (req, res) => {
-  // In a real app, you'd clear the session here
-  // For basic auth, we'll just redirect to home
-  res.redirect('/');
+app.get('/logout', logout);
+
+// Redirect root to login page
+app.get('/', (req, res) => {
+  res.redirect('/login');
 });
 
 // Redirect admin page to library (since we're combining them)
@@ -349,8 +377,34 @@ app.post('/api/admin/transcode', async (req, res) => {
   try {
     const { videoId, quality, encodingOptions } = req.body || {};
     
+    // Get transcoding settings from database
+    let transcodingSettings = {
+      defaultQuality: 'all',
+      enableHls: true,
+      useGPU: false,
+      autoTranscode: true,
+      selectedResolutions: ['1080p', '720p', '480p', '360p']
+    };
+    
+    try {
+      const settingsResult = await db.query('SELECT * FROM settings WHERE name = $1', ['transcoding']);
+      if (settingsResult.rows.length > 0) {
+        transcodingSettings = settingsResult.rows[0].value;
+      }
+    } catch (err) {
+      console.error('Error fetching transcoding settings:', err);
+    }
+    
     // Parse encoding options
-    const transcodingOptions = {};
+    const transcodingOptions = {
+      videoCodec: 'libx264',
+      audioCodec: 'aac',
+      preset: 'medium',
+      forceTranscode: false,
+      useGPU: transcodingSettings.useGPU || false,
+      autoTranscode: transcodingSettings.autoTranscode !== false,
+      selectedResolutions: transcodingSettings.selectedResolutions || ['1080p', '720p', '480p', '360p']
+    };
     
     // Add encoding options if provided
     if (encodingOptions) {
@@ -372,6 +426,21 @@ app.post('/api/admin/transcode', async (req, res) => {
       // Force transcoding even for highest quality
       if (encodingOptions.forceTranscode === true) {
         transcodingOptions.forceTranscode = true;
+      }
+      
+      // Override GPU setting if specified
+      if (encodingOptions.useGPU !== undefined) {
+        transcodingOptions.useGPU = encodingOptions.useGPU;
+      }
+      
+      // Override auto-transcode setting if specified
+      if (encodingOptions.autoTranscode !== undefined) {
+        transcodingOptions.autoTranscode = encodingOptions.autoTranscode;
+      }
+      
+      // Override selected resolutions if specified
+      if (encodingOptions.selectedResolutions && Array.isArray(encodingOptions.selectedResolutions)) {
+        transcodingOptions.selectedResolutions = encodingOptions.selectedResolutions;
       }
     }
     
@@ -416,6 +485,100 @@ app.post('/api/admin/transcode', async (req, res) => {
   }
 });
 
+// Settings API endpoints
+
+// Get transcoding settings
+app.get('/api/settings/transcoding', async (req, res) => {
+  try {
+    // Query the database for settings
+    const result = await db.query('SELECT * FROM settings WHERE name = $1', ['transcoding']);
+    
+    // If settings don't exist, return defaults
+    if (!result.rows.length) {
+      return res.json({
+        defaultQuality: 'all',
+        enableHls: true,
+        useGPU: false,
+        autoTranscode: true,
+        selectedResolutions: ['1080p', '720p', '480p', '360p']
+      });
+    }
+    
+    // Return the settings
+    res.json(result.rows[0].value);
+  } catch (err) {
+    console.error('Error fetching transcoding settings:', err);
+    res.status(500).json({ error: 'Failed to fetch transcoding settings' });
+  }
+});
+
+// Update transcoding settings
+app.put('/api/settings/transcoding', async (req, res) => {
+  try {
+    const settings = req.body;
+    
+    // Validate settings
+    if (!settings) {
+      return res.status(400).json({ error: 'No settings provided' });
+    }
+    
+    // Upsert the settings
+    await db.query(
+      'INSERT INTO settings (name, value) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET value = $2',
+      ['transcoding', settings]
+    );
+    
+    res.json({ message: 'Transcoding settings updated successfully' });
+  } catch (err) {
+    console.error('Error updating transcoding settings:', err);
+    res.status(500).json({ error: 'Failed to update transcoding settings' });
+  }
+});
+
+// Get current user
+app.get('/api/user', (req, res) => {
+  if (!req.session || !req.session.authenticated || !req.session.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  
+  // Return user info (excluding sensitive data)
+  res.json({
+    username: req.session.user.username,
+    role: req.session.user.role
+  });
+});
+
+// Change password endpoint
+app.post('/api/settings/change-password', async (req, res) => {
+  try {
+    const { username, currentPassword, newPassword } = req.body;
+    
+    if (!username || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Verify current password
+    const user = await db.verifyUserCredentials(username, currentPassword);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    
+    // Hash the new password
+    const bcrypt = require('bcrypt');
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+    
+    // Update password
+    await db.updateUserPassword(username, hashedPassword);
+    
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Error changing password:', err);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
 // Start the server
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
@@ -425,16 +588,44 @@ app.listen(PORT, async () => {
     await db.initDB();
     console.log('Database initialized successfully');
     
+    // Hash admin password if it's not already hashed
+    try {
+      await db.hashAdminPassword();
+    } catch (err) {
+      console.error('Error hashing admin password:', err);
+    }
+    
     // Check for videos that need transcoding on startup
-    setTimeout(() => {
+    setTimeout(async () => {
       console.log('Checking for videos that need transcoding...');
+      
+      // Get transcoding settings from database or environment variables
+      let transcodingSettings = {
+        defaultQuality: process.env.DEFAULT_QUALITY || 'all',
+        enableHls: true,
+        useGPU: process.env.USE_GPU === 'true',
+        autoTranscode: process.env.AUTO_TRANSCODE !== 'false',
+        selectedResolutions: ['1080p', '720p', '480p', '360p']
+      };
+      
+      try {
+        const settingsResult = await db.query('SELECT * FROM settings WHERE name = $1', ['transcoding']);
+        if (settingsResult.rows.length > 0) {
+          transcodingSettings = settingsResult.rows[0].value;
+        }
+      } catch (err) {
+        console.error('Error fetching transcoding settings:', err);
+      }
       
       // Default encoding options for startup transcoding
       const defaultOptions = {
         videoCodec: 'libx264',
         audioCodec: 'aac',
         preset: 'medium',
-        forceTranscode: false
+        forceTranscode: false,
+        useGPU: transcodingSettings.useGPU || false,
+        autoTranscode: transcodingSettings.autoTranscode !== false,
+        selectedResolutions: transcodingSettings.selectedResolutions || ['1080p', '720p', '480p', '360p']
       };
       
       processTranscodingQueue(defaultOptions).catch(err => {
