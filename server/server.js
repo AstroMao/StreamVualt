@@ -23,12 +23,13 @@ const PORT = process.env.PORT || 3000;
 // Session configuration
 app.use(session({
   secret: process.env.SESSION_SECRET || 'stream-vault-secret',
-  resave: false,
-  saveUninitialized: false,
+  resave: true,
+  saveUninitialized: true,
   cookie: { 
-    secure: process.env.NODE_ENV === 'production', 
+    secure: false, // Set to false for Docker environment
     maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
-    httpOnly: true
+    httpOnly: true,
+    sameSite: 'lax' // Allow cross-site requests
   },
   name: 'stream_vault_session' // Custom name for the session cookie
 }));
@@ -324,7 +325,17 @@ app.get('/player/:uuid', async (req, res) => {
 
 // Serve the library page (protected)
 app.get('/library', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/library/index.html'));
+  res.redirect('/admin/library');
+});
+
+// Serve the admin library page (protected)
+app.get('/admin/library', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/admin/library/index.html'));
+});
+
+// Serve the admin settings page (protected)
+app.get('/admin/settings', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/admin/settings/index.html'));
 });
 
 // Serve the login page

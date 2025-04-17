@@ -14,7 +14,8 @@ const authMiddleware = async (req, res, next) => {
     '/api/video',
     '/api/stream',
     '/css',
-    '/js'
+    '/js',
+    '/favicon.ico'
   ];
   
   // Check if the request path starts with any of the public paths
