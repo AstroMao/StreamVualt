@@ -14,7 +14,7 @@ services:
       - .env
     environment:
       - NODE_ENV=production
-      - DB_HOST=db
+      - DB_HOST=${DB_HOST:-db}
       - DB_USER=${DB_USER:-video_user}
       - DB_PASSWORD=${DB_PASSWORD:-db_password}
       - DB_NAME=${DB_NAME:-video_db}
@@ -25,8 +25,8 @@ services:
       - USE_GPU=${USE_GPU:-false}
       - AUTO_TRANSCODE=${AUTO_TRANSCODE:-true}
     volumes:
-      - ./media:/app/media:z
-      - ./upload:/app/upload:z
+      - ${MEDIA_PATH:-./media}:/app/media:z
+      - ${UPLOAD_PATH:-./upload}:/app/upload:z
     networks:
       - stream-vault-network
 
@@ -45,7 +45,7 @@ services:
     environment:
       - NGINX_PORT=${NGINX_PORT:-8080}
     volumes:
-      - ./media:/app/media:z
+      - ${MEDIA_PATH:-./media}:/app/media:z
       - ./public:/app/public:z
     networks:
       - stream-vault-network
