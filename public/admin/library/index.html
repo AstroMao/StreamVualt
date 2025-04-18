@@ -321,7 +321,13 @@
         }
         
         function createCopyURLButton(videoId) {
-            const playerUrl = `${window.location.origin}/player/${videoId}`;
+            // Check if CDN domain is set in localStorage
+            const cdnDomain = localStorage.getItem('cdnDomain');
+            
+            // Use CDN domain if available, otherwise use window.location.origin
+            const baseUrl = cdnDomain ? `https://${cdnDomain}` : window.location.origin;
+            const playerUrl = `${baseUrl}/player/${videoId}`;
+            
             const copyBtn = document.createElement('button');
             copyBtn.className = 'btn btn-small';
             copyBtn.textContent = 'Copy URL';
@@ -575,11 +581,16 @@
             card.className = 'video-card';
             card.id = `video-card-${video.uuid}`;
             
-            const playerUrl = `${window.location.origin}/player/${video.uuid}`;
+            // Check if CDN domain is set in localStorage
+            const cdnDomain = localStorage.getItem('cdnDomain');
+            
+            // Use CDN domain if available, otherwise use window.location.origin
+            const baseUrl = cdnDomain ? `https://${cdnDomain}` : window.location.origin;
+            const playerUrl = `${baseUrl}/player/${video.uuid}`;
             
             // Create the main link for playing the video
             const link = document.createElement('a');
-            link.href = `/player/${video.uuid}`;
+            link.href = playerUrl;
             link.className = 'video-link';
             link.target = '_blank'; // Open in new tab
             

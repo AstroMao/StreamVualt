@@ -200,7 +200,6 @@ If you're upgrading from a previous version that used JSON file storage, you can
 
 The system uses secure session-based authentication with bcrypt password hashing. During database initialization, two default users are created:
 - Username: `admin`, Password: `admin123`, Role: `admin`
-- Username: `user`, Password: `user123`, Role: `user`
 
 The first time you log in with these credentials, the passwords will be automatically hashed for security.
 
@@ -274,6 +273,7 @@ Potential improvements for future versions:
 - Multiple quality variants (1080p, 720p, 480p) ✅
 - Thumbnail generation from video frames ✅
 - Progress tracking for transcoding jobs ✅
+- Video upload date display in library view ✅
 
 ### Database Enhancement
 - Migration to a proper database system (PostgreSQL) ✅

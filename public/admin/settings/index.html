@@ -141,6 +141,7 @@
         <div class="tab-container">
             <div class="tab-buttons">
                 <button class="tab-button active" data-tab="transcoding">Transcoding</button>
+                <button class="tab-button" data-tab="cdn">CDN Settings</button>
                 <button class="tab-button" data-tab="account">Account</button>
             </div>
             
@@ -210,6 +211,21 @@
                 </div>
             </div>
             
+            <div id="cdn-tab" class="tab-content">
+                <div class="settings-container">
+                    <h3>CDN Settings</h3>
+                    <form id="cdnForm">
+                        <div class="form-group">
+                            <label for="cdnDomain">CDN Domain</label>
+                            <input type="text" id="cdnDomain" name="cdnDomain" placeholder="e.g., dpl888.b-cdn.net">
+                            <p class="help-text">Enter your CDN domain without http:// or https:// prefix. Leave empty to use the server's origin.</p>
+                        </div>
+                        
+                        <button type="submit" class="btn">Save CDN Settings</button>
+                    </form>
+                </div>
+            </div>
+            
             <div id="account-tab" class="tab-content">
                 <div class="settings-container">
                     <h3>Change Password</h3>
@@ -263,6 +279,29 @@
                         }
                     });
                 });
+            });
+            
+            // Load CDN settings from localStorage
+            const savedCdnDomain = localStorage.getItem('cdnDomain');
+            if (savedCdnDomain) {
+                document.getElementById('cdnDomain').value = savedCdnDomain;
+            }
+            
+            // CDN form submission handler
+            document.getElementById('cdnForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                
+                const cdnDomain = document.getElementById('cdnDomain').value.trim();
+                
+                // Save to localStorage
+                if (cdnDomain) {
+                    localStorage.setItem('cdnDomain', cdnDomain);
+                    showAlert('CDN settings saved successfully!', 'success');
+                } else {
+                    // If empty, remove the setting
+                    localStorage.removeItem('cdnDomain');
+                    showAlert('CDN domain cleared. Using server origin for URLs.', 'success');
+                }
             });
             
             // Load current transcoding settings

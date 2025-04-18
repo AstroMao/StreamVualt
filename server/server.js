@@ -64,7 +64,14 @@ const upload = multer({
 app.get('/api/videos', async (req, res) => {
   try {
     const videos = await db.getAllVideos();
-    res.json(videos);
+    // Transform snake_case to camelCase for frontend consistency
+    const transformedVideos = videos.map(video => ({
+      uuid: video.uuid,
+      title: video.title,
+      description: video.description,
+      dateAdded: video.date_added
+    }));
+    res.json(transformedVideos);
   } catch (err) {
     console.error('Error fetching videos:', err);
     res.status(500).json({ error: 'Failed to fetch videos' });
