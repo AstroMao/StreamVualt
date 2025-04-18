@@ -2,11 +2,11 @@ version: '3.8'
 
 services:
   app:
-    build: .
+    build: ./docker
     container_name: stream-vault-app
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       db:
         condition: service_healthy
@@ -27,6 +27,26 @@ services:
     volumes:
       - ./media:/app/media:z
       - ./upload:/app/upload:z
+    networks:
+      - stream-vault-network
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nginx
+    container_name: stream-vault-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-8080}:${NGINX_PORT:-8080}"
+    depends_on:
+      - app
+    env_file:
+      - .env
+    environment:
+      - NGINX_PORT=${NGINX_PORT:-8080}
+    volumes:
+      - ./media:/app/media:z
+      - ./public:/app/public:z
     networks:
       - stream-vault-network
 

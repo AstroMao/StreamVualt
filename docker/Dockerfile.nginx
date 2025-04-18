@@ -1,0 +1,22 @@
+FROM nginx:alpine
+
+# Copy custom nginx config
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf.template
+
+# Copy entrypoint script
+COPY docker/docker-entrypoint-nginx.sh /docker-entrypoint.sh
+
+# Make the entrypoint script executable
+RUN chmod +x /docker-entrypoint.sh
+
+# Set environment variables with defaults
+ENV NGINX_PORT=8080
+
+# Expose the port
+EXPOSE ${NGINX_PORT}
+
+# Use the entrypoint script to substitute environment variables
+ENTRYPOINT ["/docker-entrypoint.sh"]
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]

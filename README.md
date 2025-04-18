@@ -22,6 +22,7 @@ This project is designed to be simple yet functional, focusing on the core featu
 - **Secure Library**: Protected video management interface with authentication
 - **Basic Authentication**: Protect admin functions with simple username/password
 - **Responsive Design**: Works on desktop and mobile devices
+- **Nginx Integration**: Serves static files and proxies requests to the Node.js server
 
 ## Project Structure
 
@@ -45,7 +46,10 @@ stream-vault/
 │       └── master.m3u8  # HLS manifest
 ├── upload/              # Temporary upload directory
 ├── package.json         # Project dependencies
-└── nginx.conf           # Nginx configuration
+├── nginx.conf           # Nginx configuration
+├── Dockerfile           # Node.js application Dockerfile
+├── Dockerfile.nginx     # Nginx Dockerfile
+└── docker-compose.yml   # Docker Compose configuration
 ```
 
 ## Installation
@@ -85,9 +89,18 @@ stream-vault/
    cd stream-vault
    ```
 
+2. Create a `.env` file based on `.env.example`:
+   ```
+   cp .env.example .env
+   ```
+
+3. Configure the environment variables in the `.env` file:
+   - Set `NGINX_PORT` to specify the port Nginx will listen on (default: 8080)
+   - Set other variables as needed for your environment
+
 #### Using Docker
 
-2. Build and start the containers using npm scripts:
+4. Build and start the containers using npm scripts:
    ```
    npm run docker:build
    npm run docker:up
@@ -98,9 +111,9 @@ stream-vault/
    docker-compose up -d
    ```
 
-3. The application will be available at http://localhost:3000
+5. The application will be available at http://localhost:8080 (or the port you specified in NGINX_PORT)
 
-4. To stop the containers:
+6. To stop the containers:
    ```
    npm run docker:down
    ```
@@ -110,7 +123,7 @@ stream-vault/
    docker-compose down
    ```
 
-5. To view logs:
+7. To view logs:
    ```
    npm run docker:logs
    ```
@@ -122,7 +135,7 @@ stream-vault/
 
 #### Using Podman
 
-2. Install podman-compose if you don't have it already:
+4. Install podman-compose if you don't have it already:
    ```
    npm run podman:install
    ```
@@ -132,7 +145,7 @@ stream-vault/
    pip3 install podman-compose
    ```
 
-3. Build and start the containers using npm scripts:
+5. Build and start the containers using npm scripts:
    ```
    npm run podman:build
    npm run podman:up
@@ -143,9 +156,9 @@ stream-vault/
    podman-compose up -d
    ```
 
-3. The application will be available at http://localhost:3000
+6. The application will be available at http://localhost:8080 (or the port you specified in NGINX_PORT)
 
-4. To stop the containers:
+7. To stop the containers:
    ```
    npm run podman:down
    ```
@@ -155,7 +168,7 @@ stream-vault/
    podman-compose down
    ```
 
-5. To view logs:
+8. To view logs:
    ```
    npm run podman:logs
    ```
@@ -264,6 +277,10 @@ Alternatively, you can use the Settings page to change your password after loggi
 
 The VideoJS player can be customized by editing `public/player/index.html`. Refer to the [VideoJS documentation](https://videojs.com/guides/) for more options.
 
+### Configuring Nginx
+
+The Nginx configuration can be customized by editing the `nginx.conf` file. When using Docker, you can change the port Nginx listens on by setting the `NGINX_PORT` environment variable in your `.env` file (default is 8080).
+
 ## Future Enhancements
 
 Potential improvements for future versions:
@@ -285,7 +302,8 @@ Potential improvements for future versions:
 ### Containerization
 - Docker setup for easy deployment ✅
 - Docker Compose for orchestration ✅
-- Production-ready configuration
+- Nginx integration for serving static files ✅
+- Production-ready configuration ✅
 
 ### Additional Features
 - Adaptive bitrate streaming improvements
