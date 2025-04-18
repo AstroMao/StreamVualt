@@ -44,12 +44,13 @@ stream-vault/
 │       ├── 720p/
 │       ├── 480p/
 │       └── master.m3u8  # HLS manifest
+├── docker/              # Docker-relate
+│   ├── nginx.conf           # Nginx configuration
+│   ├── Dockerfile           # Node.js application Dockerfile
+│   ├── Dockerfile.nginx     # Nginx Dockerfile
+│   └── docker-compose.yml   # Docker Compose configuration
 ├── upload/              # Temporary upload directory
-├── package.json         # Project dependencies
-├── nginx.conf           # Nginx configuration
-├── Dockerfile           # Node.js application Dockerfile
-├── Dockerfile.nginx     # Nginx Dockerfile
-└── docker-compose.yml   # Docker Compose configuration
+└── package.json         # Project dependencies
 ```
 
 ## Installation
