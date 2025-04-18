@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const unzipper = require('unzipper');
 const { authMiddleware, login, logout } = require('./auth');
-const { processTranscodingQueue } = require('./transcode');
+const { processTranscodingQueue, getTranscodingLogs, resetTranscoding, pauseTranscoding, resumeTranscoding } = require('./transcode');
 const db = require('./db');
 
 // Promisify the pipeline function
@@ -564,6 +564,48 @@ app.get('/api/user', (req, res) => {
     username: req.session.user.username,
     role: req.session.user.role
   });
+});
+
+// Get transcoding logs
+app.get('/api/transcoding/logs', (req, res) => {
+  try {
+    const sinceId = parseInt(req.query.since || '0');
+    const logs = getTranscodingLogs(sinceId);
+    res.json(logs);
+  } catch (err) {
+    console.error('Error fetching transcoding logs:', err);
+    res.status(500).json({ error: 'Failed to fetch transcoding logs' });
+  }
+});
+
+// Pause transcoding process
+app.post('/api/transcoding/pause', (req, res) => {
+  try {
+    const result = pauseTranscoding();
+    if (result.success) {
+      res.json({ message: result.message });
+    } else {
+      res.status(400).json({ error: result.message });
+    }
+  } catch (err) {
+    console.error('Error pausing transcoding:', err);
+    res.status(500).json({ error: 'Failed to pause transcoding process' });
+  }
+});
+
+// Resume transcoding process
+app.post('/api/transcoding/resume', (req, res) => {
+  try {
+    const result = resumeTranscoding();
+    if (result.success) {
+      res.json({ message: result.message });
+    } else {
+      res.status(400).json({ error: result.message });
+    }
+  } catch (err) {
+    console.error('Error resuming transcoding:', err);
+    res.status(500).json({ error: 'Failed to resume transcoding process' });
+  }
 });
 
 // Change password endpoint

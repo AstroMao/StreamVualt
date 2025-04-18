@@ -51,6 +51,18 @@ const generateThumbnail = (videoPath, outputPath, timeInSeconds = 5) => {
 const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'all', encodingOptions = {}) => {
   return new Promise(async (resolve, reject) => {
     try {
+      // Set active transcoding flag
+      activeTranscoding = true;
+      
+      // Reset transcoding stats
+      updateTranscodingStats({
+        videoCodec: '',
+        speed: '',
+        resourceUsage: ''
+      });
+      
+      // Add initial log
+      addTranscodingLog(`Starting transcoding for ${path.basename(videoPath)}`);
       // Get video metadata
       const metadata = await getVideoMetadata(videoPath);
       const { width, height } = metadata.streams[0];
@@ -62,6 +74,8 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
       const videoCodec = metadata.streams[0].codec_name || 'unknown';
       const audioCodec = metadata.streams.find(s => s.codec_type === 'audio')?.codec_name || 'unknown';
       console.log(`Original video codec: ${videoCodec}, audio codec: ${audioCodec}`);
+      addTranscodingLog(`Original video codec: ${videoCodec}, audio codec: ${audioCodec}`);
+      updateTranscodingStats({ videoCodec: `${videoCodec} → ${encodingOptions.videoCodec || 'libx264'}` });
       
       // Define quality variants based on original video resolution
       const allQualities = [];
@@ -141,6 +155,7 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
       }
       
       console.log(`Transcoding with qualities: ${qualities.map(q => q.name).join(', ')}`);
+      addTranscodingLog(`Transcoding with qualities: ${qualities.map(q => q.name).join(', ')}`);
       
       // Create directories for each quality
       for (const quality of qualities) {
@@ -184,6 +199,7 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
         
         if (isHighestQuality && resolutionMatches && canCopyVideo && canCopyAudio && !forceTranscode) {
           console.log(`Using stream copy for highest quality (${quality.name})`);
+          addTranscodingLog(`Using stream copy for highest quality (${quality.name})`);
           ffmpegCommand.outputOptions([
             '-c copy',             // Copy both video and audio codecs (efficient for highest quality)
             '-hls_time 10',        // 10 second segments
@@ -193,6 +209,7 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
         } else {
           // For lower qualities or incompatible formats, properly transcode with specific settings
           console.log(`Transcoding for ${quality.name} using ${videoCodecToUse}`);
+          addTranscodingLog(`Transcoding for ${quality.name} using ${videoCodecToUse}`);
           
           // Base output options
           const outputOptions = [
@@ -247,9 +264,88 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
           ffmpegCommand.outputOptions(outputOptions);
         }
         
+        // Apply CPU usage limit if specified
+        if (encodingOptions.cpuUsage && parseInt(encodingOptions.cpuUsage) > 0) {
+          const cpuUsage = parseInt(encodingOptions.cpuUsage);
+          
+          // Get available CPU cores
+          const os = require('os');
+          const availableCores = os.cpus().length;
+          
+          // Calculate threads based on percentage (minimum 1 thread)
+          const threads = Math.max(1, Math.floor(availableCores * (cpuUsage / 100)));
+          
+          // Apply thread limit to ffmpeg command
+          // Note: We need to add this to the main command options, not just output options
+          ffmpegCommand.addOptions([`-threads ${threads}`]);
+          ffmpegCommand.outputOptions([`-threads ${threads}`]);
+          
+          // Also limit CPU affinity if possible (Linux only)
+          try {
+            const { execSync } = require('child_process');
+            // Check if taskset is available
+            execSync('which taskset', { stdio: 'pipe' });
+            // We'll apply taskset when we get the process ID in the 'start' event
+          } catch (err) {
+            // taskset not available, just use thread limiting
+          }
+          
+          addTranscodingLog(`Limiting CPU usage to ${cpuUsage}% (${threads} of ${availableCores} cores)`);
+          updateTranscodingStats({ resourceUsage: `${cpuUsage}% (${threads} cores)` });
+        } else {
+          // Default resource usage display
+          updateTranscodingStats({ resourceUsage: encodingOptions.useGPU ? 'GPU (NVENC)' : 'CPU (all cores)' });
+        }
+        
         // Process this quality variant
         await new Promise((resolve, reject) => {
-          ffmpegCommand.output(playlistPath)
+          const ffmpegProcess = ffmpegCommand.output(playlistPath)
+            .on('start', (commandLine) => {
+              addTranscodingLog(`FFmpeg command: ${commandLine}`, 'info');
+              
+              // Store the ffmpeg process for pause/resume functionality
+              currentFfmpegProcess = ffmpegProcess;
+              
+              // Get the process ID for pause/resume functionality
+              if (ffmpegProcess && ffmpegProcess._events && ffmpegProcess._events.error) {
+                // Try to get the process ID from the fluent-ffmpeg object
+                try {
+                  // Access the internal ffmpeg process to get its PID
+                  const childProcess = ffmpegProcess.ffmpegProc;
+                  if (childProcess && childProcess.pid) {
+                    addTranscodingLog(`FFmpeg process started with PID: ${childProcess.pid}`, 'info');
+                    // Store the PID directly on the ffmpegProcess object
+                    ffmpegProcess.pid = childProcess.pid;
+                  }
+                } catch (err) {
+                  addTranscodingLog(`Warning: Could not get FFmpeg process ID: ${err.message}`, 'warning');
+                }
+              }
+              
+              updateTranscodingStats({ status: 'active' });
+            })
+            .on('stderr', (stderrLine) => {
+              // Extract useful information from ffmpeg output
+              if (stderrLine.includes('fps=') && stderrLine.includes('speed=')) {
+                try {
+                  const speedMatch = stderrLine.match(/speed=([0-9.]+)x/);
+                  if (speedMatch && speedMatch[1]) {
+                    const speed = `${speedMatch[1]}x`;
+                    updateTranscodingStats({ speed });
+                  }
+                } catch (e) {
+                  // Ignore parsing errors
+                }
+              }
+              
+              // Add to logs if it contains useful information
+              if (stderrLine.includes('fps=') || 
+                  stderrLine.includes('stream') || 
+                  stderrLine.includes('error') || 
+                  stderrLine.includes('warning')) {
+                addTranscodingLog(stderrLine, stderrLine.includes('error') ? 'error' : 'info');
+              }
+            })
             .on('progress', (progress) => {
               // Calculate overall progress
               const qualityProgress = progress.percent / 100;
@@ -260,13 +356,16 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
               updateVideoStatus(videoUuid, 'transcoding', overallProgress);
               
               console.log(`[${quality.name}] Processing: ${progress.percent}% done (Overall: ${overallProgress}%)`);
+              addTranscodingLog(`[${quality.name}] Processing: ${progress.percent}% done (Overall: ${overallProgress}%)`);
             })
             .on('end', () => {
               console.log(`[${quality.name}] Transcoding complete`);
+              addTranscodingLog(`[${quality.name}] Transcoding complete`);
               resolve();
             })
             .on('error', (err) => {
               console.error(`[${quality.name}] Error:`, err);
+              addTranscodingLog(`[${quality.name}] Error: ${err.message}`, 'error');
               reject(err);
             })
             .run();
@@ -288,6 +387,51 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
   });
 };
 
+// Store transcoding logs and stats
+const transcodingLogs = [];
+let logIdCounter = 0;
+let activeTranscoding = false;
+let pausedTranscoding = false;
+let currentFfmpegProcess = null;
+let transcodingStats = {
+  videoCodec: '',
+  speed: '',
+  resourceUsage: '',
+  status: 'idle' // idle, active, paused
+};
+
+// Add a log entry
+const addTranscodingLog = (message, type = 'info') => {
+  const log = {
+    id: ++logIdCounter,
+    timestamp: new Date(),
+    message,
+    type
+  };
+  transcodingLogs.push(log);
+  
+  // Keep only the last 1000 logs
+  if (transcodingLogs.length > 1000) {
+    transcodingLogs.shift();
+  }
+  
+  return log;
+};
+
+// Update transcoding stats
+const updateTranscodingStats = (stats) => {
+  transcodingStats = { ...transcodingStats, ...stats };
+};
+
+// Get transcoding logs since a specific ID
+const getTranscodingLogs = (sinceId = 0) => {
+  return {
+    active: activeTranscoding,
+    logs: transcodingLogs.filter(log => log.id > sinceId),
+    stats: transcodingStats
+  };
+};
+
 /**
  * Process videos that need transcoding
  * @param {Object} options - Options for the transcoding process
@@ -297,6 +441,7 @@ const createHLSStream = (videoUuid, videoPath, outputDir, requestedQuality = 'al
  * @param {boolean} options.forceTranscode - Force transcoding even for highest quality
  * @param {boolean} options.useGPU - Use GPU acceleration if available
  * @param {boolean} options.autoTranscode - Automatically transcode videos after upload
+ * @param {number} options.cpuThreads - Number of CPU threads to use (0 = automatic)
  * @returns {Promise<void>}
  */
 const processTranscodingQueue = async (options = {}) => {
@@ -324,22 +469,57 @@ const processTranscodingQueue = async (options = {}) => {
     // Check if GPU acceleration is requested and available
     if (encodingOptions.useGPU) {
       try {
-        // Check for NVIDIA GPU
-        const { exec } = require('child_process');
-        exec('nvidia-smi', (error, stdout, stderr) => {
-          if (!error) {
-            console.log('NVIDIA GPU detected, using hardware acceleration');
-            // Use NVIDIA hardware acceleration
-            encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'hevc_nvenc' : 'h264_nvenc';
-          } else {
-            console.log('NVIDIA GPU not detected or drivers not installed, falling back to CPU encoding');
+        // Check for NVIDIA GPU using a synchronous approach
+        const { execSync } = require('child_process');
+        try {
+          // Try to run nvidia-smi to check for NVIDIA GPU
+          execSync('nvidia-smi', { stdio: 'pipe' });
+          console.log('NVIDIA GPU detected, using hardware acceleration');
+          
+          // Use NVIDIA hardware acceleration
+          encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'hevc_nvenc' : 'h264_nvenc';
+          
+          // Add log entry
+          addTranscodingLog('NVIDIA GPU detected, using hardware acceleration (NVENC)');
+        } catch (gpuError) {
+          console.log('NVIDIA GPU not detected or drivers not installed, falling back to CPU encoding');
+          
+          // Try to detect available encoders
+          try {
+            const encoders = execSync('ffmpeg -encoders', { stdio: 'pipe' }).toString();
+            
+            // Check for alternative encoders
+            if (encoders.includes('h264_vaapi')) {
+              console.log('VAAPI encoder detected, using hardware acceleration');
+              encodingOptions.videoCodec = 'h264_vaapi';
+              addTranscodingLog('Using VAAPI hardware acceleration');
+            } else if (encoders.includes('h264_qsv')) {
+              console.log('QuickSync encoder detected, using hardware acceleration');
+              encodingOptions.videoCodec = 'h264_qsv';
+              addTranscodingLog('Using QuickSync hardware acceleration');
+            } else if (encoders.includes('h264_amf')) {
+              console.log('AMD encoder detected, using hardware acceleration');
+              encodingOptions.videoCodec = 'h264_amf';
+              addTranscodingLog('Using AMD hardware acceleration');
+            } else if (encoders.includes('h264_v4l2m2m')) {
+              console.log('V4L2 encoder detected, using hardware acceleration');
+              encodingOptions.videoCodec = 'h264_v4l2m2m';
+              addTranscodingLog('Using V4L2 hardware acceleration');
+            } else {
+              // Fall back to CPU encoding
+              encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'libx265' : 'libx264';
+              addTranscodingLog('No hardware acceleration available, using CPU encoding');
+            }
+          } catch (encoderError) {
             // Fall back to CPU encoding
             encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'libx265' : 'libx264';
+            addTranscodingLog('Error detecting encoders, using CPU encoding');
           }
-        });
+        }
       } catch (err) {
         console.log('Error checking for GPU, falling back to CPU encoding:', err);
         encodingOptions.videoCodec = encodingOptions.videoCodec === 'libx265' ? 'libx265' : 'libx264';
+        addTranscodingLog('Error checking for GPU, using CPU encoding');
       }
     }
     
@@ -433,11 +613,92 @@ const processTranscodingQueue = async (options = {}) => {
   }
 };
 
+// Pause transcoding process
+const pauseTranscoding = () => {
+  if (!activeTranscoding || pausedTranscoding) {
+    return { success: false, message: 'No active transcoding process to pause' };
+  }
+  
+  // Check if we have a valid process to pause
+  if (!currentFfmpegProcess || !currentFfmpegProcess.pid) {
+    addTranscodingLog('Cannot pause: No valid ffmpeg process found', 'error');
+    return { success: false, message: 'No valid ffmpeg process found' };
+  }
+  
+  pausedTranscoding = true;
+  updateTranscodingStats({ status: 'paused' });
+  addTranscodingLog('Attempting to pause transcoding process...', 'info');
+  
+  // Signal to ffmpeg to pause
+  try {
+    // Log the PID we're trying to pause
+    addTranscodingLog(`Sending SIGSTOP to process with PID: ${currentFfmpegProcess.pid}`, 'info');
+    
+    // Send SIGSTOP signal to pause the process
+    process.kill(currentFfmpegProcess.pid, 'SIGSTOP');
+    
+    addTranscodingLog('Transcoding process paused successfully', 'info');
+    return { success: true, message: 'Transcoding paused' };
+  } catch (err) {
+    addTranscodingLog(`Error pausing transcoding: ${err.message}`, 'error');
+    // Reset the paused state since we failed
+    pausedTranscoding = false;
+    updateTranscodingStats({ status: 'active' });
+    return { success: false, message: `Failed to pause: ${err.message}` };
+  }
+};
+
+// Resume transcoding process
+const resumeTranscoding = () => {
+  if (!activeTranscoding || !pausedTranscoding) {
+    return { success: false, message: 'No paused transcoding process to resume' };
+  }
+  
+  // Check if we have a valid process to resume
+  if (!currentFfmpegProcess || !currentFfmpegProcess.pid) {
+    addTranscodingLog('Cannot resume: No valid ffmpeg process found', 'error');
+    return { success: false, message: 'No valid ffmpeg process found' };
+  }
+  
+  addTranscodingLog('Attempting to resume transcoding process...', 'info');
+  
+  // Signal to ffmpeg to resume
+  try {
+    // Log the PID we're trying to resume
+    addTranscodingLog(`Sending SIGCONT to process with PID: ${currentFfmpegProcess.pid}`, 'info');
+    
+    // Send SIGCONT signal to resume the process
+    process.kill(currentFfmpegProcess.pid, 'SIGCONT');
+    
+    pausedTranscoding = false;
+    updateTranscodingStats({ status: 'active' });
+    addTranscodingLog('Transcoding process resumed successfully', 'info');
+    return { success: true, message: 'Transcoding resumed' };
+  } catch (err) {
+    addTranscodingLog(`Error resuming transcoding: ${err.message}`, 'error');
+    return { success: false, message: `Failed to resume: ${err.message}` };
+  }
+};
+
+// Reset active transcoding flag when done
+const resetTranscoding = () => {
+  activeTranscoding = false;
+  pausedTranscoding = false;
+  currentFfmpegProcess = null;
+  updateTranscodingStats({ status: 'idle' });
+  addTranscodingLog('Transcoding process completed', 'info');
+};
+
 // Export functions
 module.exports = {
   processTranscodingQueue,
   createHLSStream,
   generateThumbnail,
   getVideoMetadata,
-  updateVideoStatus
+  updateVideoStatus,
+  getTranscodingLogs,
+  addTranscodingLog,
+  resetTranscoding,
+  pauseTranscoding,
+  resumeTranscoding
 };

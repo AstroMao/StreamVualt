@@ -122,6 +122,88 @@
         .tab-content.active {
             display: block;
         }
+        
+        .console-output {
+            background-color: #1e1e1e;
+            color: #f0f0f0;
+            font-family: monospace;
+            padding: 15px;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .console-output .console-line {
+            margin: 0;
+            line-height: 1.5;
+        }
+        
+        .console-output .console-placeholder {
+            color: #888;
+            font-style: italic;
+        }
+        
+        .console-output .console-info {
+            color: #4fc3f7;
+        }
+        
+        .console-output .console-warning {
+            color: #ffb74d;
+        }
+        
+        .console-output .console-error {
+            color: #ef5350;
+        }
+        
+        .transcoding-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 15px;
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .stat-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #666;
+        }
+        
+        .stat-value {
+            font-family: monospace;
+            font-size: 16px;
+        }
+        
+        .transcoding-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .btn-warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+            color: #fff;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -206,7 +288,53 @@
                             </div>
                         </div>
                         
+                        <div class="form-group">
+                            <label for="cpuUsage">CPU Usage Limit</label>
+                            <select id="cpuUsage" name="cpuUsage">
+                                <option value="0">Automatic (Use all available)</option>
+                                <option value="10">10% (Minimum)</option>
+                                <option value="20">20%</option>
+                                <option value="30">30%</option>
+                                <option value="40">40%</option>
+                                <option value="50">50%</option>
+                                <option value="60">60%</option>
+                                <option value="70">70%</option>
+                                <option value="80">80%</option>
+                                <option value="90">90%</option>
+                            </select>
+                            <p class="help-text">Limit CPU usage during transcoding to prevent system overload</p>
+                        </div>
+                        
                         <button type="submit" class="btn">Save Transcoding Settings</button>
+                        
+                        <div class="form-group" style="margin-top: 30px;">
+                            <h4>Transcoding Console Output</h4>
+                            <div class="transcoding-controls">
+                                <button type="button" id="pauseTranscoding" class="btn btn-warning">Pause Transcoding</button>
+                                <button type="button" id="resumeTranscoding" class="btn btn-success" disabled>Resume Transcoding</button>
+                            </div>
+                            <div id="transcodeConsole" class="console-output">
+                                <p class="console-placeholder">No active transcoding process</p>
+                            </div>
+                            <div class="transcoding-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">Video Codec:</span>
+                                    <span id="videoCodec" class="stat-value">-</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Speed:</span>
+                                    <span id="transcodeSpeed" class="stat-value">-</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Resource Usage:</span>
+                                    <span id="resourceUsage" class="stat-value">-</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Status:</span>
+                                    <span id="transcodingStatus" class="stat-value">idle</span>
+                                </div>
+                            </div>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -316,12 +444,20 @@
                     document.getElementById('autoTranscode').checked = settings.autoTranscode !== false;
                     document.getElementById('useGPU').checked = settings.useGPU === true;
                     
+                    // Set CPU usage
+                    if (settings.cpuUsage !== undefined) {
+                        document.getElementById('cpuUsage').value = settings.cpuUsage;
+                    }
+                    
                     // Set resolution checkboxes
                     const selectedResolutions = settings.selectedResolutions || ['1080p', '720p', '480p', '360p'];
                     document.getElementById('res1080p').checked = selectedResolutions.includes('1080p');
                     document.getElementById('res720p').checked = selectedResolutions.includes('720p');
                     document.getElementById('res480p').checked = selectedResolutions.includes('480p');
                     document.getElementById('res360p').checked = selectedResolutions.includes('360p');
+                    
+                    // Start polling for transcoding logs
+                    startTranscodingLogPolling();
                 }
             } catch (error) {
                 console.error('Error loading transcoding settings:', error);
@@ -337,6 +473,7 @@
                 const enableHls = document.getElementById('enableHls').checked;
                 const autoTranscode = document.getElementById('autoTranscode').checked;
                 const useGPU = document.getElementById('useGPU').checked;
+                const cpuUsage = parseInt(document.getElementById('cpuUsage').value);
                 
                 // Get selected resolutions
                 const selectedResolutions = [];
@@ -362,6 +499,7 @@
                             enableHls, 
                             autoTranscode,
                             useGPU,
+                            cpuUsage,
                             selectedResolutions
                         })
                     });
@@ -443,6 +581,157 @@
                 alert.remove();
             }, 5000);
         }
+        
+        // Transcoding log polling
+        let pollingInterval;
+        let lastLogId = 0;
+        
+        function startTranscodingLogPolling() {
+            // Clear any existing polling
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            // Check for active transcoding and update console
+            checkActiveTranscoding();
+            
+            // Poll every 2 seconds
+            pollingInterval = setInterval(checkActiveTranscoding, 2000);
+        }
+        
+        async function checkActiveTranscoding() {
+            try {
+                const response = await fetch(`/api/transcoding/logs?since=${lastLogId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.logs && data.logs.length > 0) {
+                        updateConsoleOutput(data.logs);
+                        lastLogId = data.logs[data.logs.length - 1].id;
+                    }
+                    
+                    // Update stats if available
+                    if (data.stats) {
+                        updateTranscodingStats(data.stats);
+                    }
+                    
+                    // If no active transcoding, show placeholder
+                    if (data.active === false) {
+                        document.getElementById('transcodeConsole').innerHTML = 
+                            '<p class="console-placeholder">No active transcoding process</p>';
+                        
+                        // Reset stats
+                        document.getElementById('videoCodec').textContent = '-';
+                        document.getElementById('transcodeSpeed').textContent = '-';
+                        document.getElementById('resourceUsage').textContent = '-';
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching transcoding logs:', error);
+            }
+        }
+        
+        function updateConsoleOutput(logs) {
+            const consoleElement = document.getElementById('transcodeConsole');
+            
+            // If first log, clear placeholder
+            if (consoleElement.querySelector('.console-placeholder')) {
+                consoleElement.innerHTML = '';
+            }
+            
+            // Add new logs
+            logs.forEach(log => {
+                const logLine = document.createElement('p');
+                logLine.className = `console-line ${getLogClass(log.type)}`;
+                logLine.textContent = log.message;
+                consoleElement.appendChild(logLine);
+            });
+            
+            // Scroll to bottom
+            consoleElement.scrollTop = consoleElement.scrollHeight;
+        }
+        
+        function getLogClass(type) {
+            switch (type) {
+                case 'error': return 'console-error';
+                case 'warning': return 'console-warning';
+                case 'info': return 'console-info';
+                default: return '';
+            }
+        }
+        
+        function updateTranscodingStats(stats) {
+            if (stats.videoCodec) {
+                document.getElementById('videoCodec').textContent = stats.videoCodec;
+            }
+            
+            if (stats.speed) {
+                document.getElementById('transcodeSpeed').textContent = stats.speed;
+            }
+            
+            if (stats.resourceUsage) {
+                document.getElementById('resourceUsage').textContent = stats.resourceUsage;
+            }
+            
+            if (stats.status) {
+                document.getElementById('transcodingStatus').textContent = stats.status;
+                
+                // Update pause/resume buttons based on status
+                const pauseBtn = document.getElementById('pauseTranscoding');
+                const resumeBtn = document.getElementById('resumeTranscoding');
+                
+                if (stats.status === 'active') {
+                    pauseBtn.disabled = false;
+                    resumeBtn.disabled = true;
+                } else if (stats.status === 'paused') {
+                    pauseBtn.disabled = true;
+                    resumeBtn.disabled = false;
+                } else {
+                    // Idle or other states
+                    pauseBtn.disabled = true;
+                    resumeBtn.disabled = true;
+                }
+            }
+        }
+        
+        // Pause and Resume button handlers
+        document.getElementById('pauseTranscoding').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/transcoding/pause', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showAlert(data.message, 'success');
+                } else {
+                    const errorData = await response.json();
+                    showAlert(errorData.error || 'Failed to pause transcoding', 'danger');
+                }
+            } catch (error) {
+                console.error('Error pausing transcoding:', error);
+                showAlert('Error: ' + error.message, 'danger');
+            }
+        });
+        
+        document.getElementById('resumeTranscoding').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/transcoding/resume', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showAlert(data.message, 'success');
+                } else {
+                    const errorData = await response.json();
+                    showAlert(errorData.error || 'Failed to resume transcoding', 'danger');
+                }
+            } catch (error) {
+                console.error('Error resuming transcoding:', error);
+                showAlert('Error: ' + error.message, 'danger');
+            }
+        });
     </script>
 </body>
 </html>
